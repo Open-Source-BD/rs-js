@@ -1,1 +1,5 @@
 /target
+
+# pkg-node/, pkg/, pkg-web/ are intentionally NOT gitignored.
+# Commit them so npm consumers get pre-built WASM without needing Rust.
+# Rebuild with: npm run build

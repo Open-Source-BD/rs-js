@@ -1,0 +1,31 @@
+{
+  "name": "rs-js",
+  "version": "0.1.0",
+  "description": "High-performance data processing powered by Rust + WebAssembly. Filter, map, reduce, groupBy, count, find — on 100k–1M records with a simple JS API.",
+  "main": "js/index.node.cjs",
+  "types": "js/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./js/index.node.cjs",
+      "import":  "./js/index.js",
+      "types":   "./js/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build":          "wasm-pack build --release --target nodejs  --out-dir pkg-node",
+    "build:web":      "wasm-pack build --release --target web     --out-dir pkg-web",
+    "build:bundler":  "wasm-pack build --release --target bundler --out-dir pkg",
+    "build:all":      "npm run build && npm run build:web && npm run build:bundler",
+    "test:rust":      "cargo test",
+    "prepublishOnly": "npm run build:all"
+  },
+  "files": [
+    "js/",
+    "pkg-node/",
+    "pkg/",
+    "pkg-web/"
+  ],
+  "keywords": ["wasm", "rust", "data-processing", "filter", "reduce", "groupby", "performance"],
+  "license": "MIT",
+  "sideEffects": false
+}
