@@ -22,3 +22,15 @@ export async function process(data, operations, options) {
     const wasm = await getWasm();
     return wasm.processRaw(data, operations, options ?? undefined);
 }
+
+/**
+ * Create a stateful DataEngine. Deserializes data once into WASM memory.
+ * Call .query() many times without re-serializing the dataset.
+ *
+ * @param {Record<string, unknown>[]} data
+ * @returns {Promise<import('./index.d.ts').DataEngine>}
+ */
+export async function createEngine(data) {
+    const wasm = await getWasm();
+    return new wasm.DataEngine(data);
+}

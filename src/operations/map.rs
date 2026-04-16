@@ -1,9 +1,10 @@
-use crate::types::{ArithOp, DataError, Dataset, MapExpr, MapOp, Row};
+use crate::types::{ArithOp, DataError, MapExpr, MapOp, Row};
 use serde_json::Value;
 
-pub fn apply_map(data: Dataset, op: MapOp) -> Result<Dataset, DataError> {
-    data.into_iter()
-        .map(|mut row| {
+pub fn apply_map(data: &[Row], op: MapOp) -> Result<Vec<Row>, DataError> {
+    data.iter()
+        .map(|row| {
+            let mut row = row.clone();
             for transform in &op.transforms {
                 let new_val = eval_expr(&row, &transform.expr)?;
                 row.insert(transform.field.clone(), new_val);
@@ -57,7 +58,7 @@ fn eval_expr(row: &Row, expr: &MapExpr) -> Result<Value, DataError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::FieldTransform;
+    use crate::types::{FieldTransform, MapExpr, ArithOp};
     use serde_json::json;
 
     fn make_row(pairs: &[(&str, serde_json::Value)]) -> Row {
@@ -73,7 +74,7 @@ mod tests {
                 expr: MapExpr::Template { template: "{first} {last}".into() },
             }],
         };
-        let result = apply_map(data, op).unwrap();
+        let result = apply_map(&data, op).unwrap();
         assert_eq!(result[0].get("name"), Some(&json!("Alice Smith")));
     }
 
@@ -90,7 +91,7 @@ mod tests {
                 },
             }],
         };
-        let result = apply_map(data, op).unwrap();
+        let result = apply_map(&data, op).unwrap();
         assert_eq!(result[0].get("double_salary").and_then(|v| v.as_f64()), Some(100000.0));
     }
 }

@@ -48,3 +48,15 @@ export declare function process(
     operations: Operation[],
     options?: PipelineOptions,
 ): Promise<PipelineResult>;
+
+export declare class DataEngine {
+    constructor(data: Record<string, unknown>[]);
+    query(operations: Operation[], options?: PipelineOptions): PipelineResult;
+    len(): number;
+    is_empty(): boolean;
+    free(): void;
+}
+
+export declare function createEngine(
+    data: Record<string, unknown>[],
+): Promise<DataEngine>;

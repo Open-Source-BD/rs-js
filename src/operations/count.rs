@@ -1,7 +1,7 @@
-use crate::types::{CountOp, Dataset};
+use crate::types::{CountOp, Row};
 use serde_json::Value;
 
-pub fn apply_count(data: &Dataset, op: CountOp) -> usize {
+pub fn apply_count(data: &[Row], op: CountOp) -> usize {
     match op.field {
         None => data.len(),
         Some(field) => data.iter().filter(|row| {
@@ -16,7 +16,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn make_data() -> Dataset {
+    fn make_data() -> Vec<Row> {
         vec![
             [("active", json!(true))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
             [("active", json!(false))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),

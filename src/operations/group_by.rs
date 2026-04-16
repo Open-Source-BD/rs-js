@@ -1,11 +1,11 @@
 use crate::{
     operations::reduce::apply_reduce,
-    types::{DataError, Dataset, GroupByOp, PipelineResult, Row},
+    types::{DataError, GroupByOp, PipelineResult, Row},
 };
 use indexmap::IndexMap;
 use serde_json::Value;
 
-pub fn apply_group_by(data: Dataset, op: GroupByOp) -> Result<PipelineResult, DataError> {
+pub fn apply_group_by(data: &[Row], op: GroupByOp) -> Result<PipelineResult, DataError> {
     let mut groups: IndexMap<String, Vec<Row>> = IndexMap::new();
 
     for row in data {
@@ -20,7 +20,7 @@ pub fn apply_group_by(data: Dataset, op: GroupByOp) -> Result<PipelineResult, Da
             })
             .collect::<Vec<_>>()
             .join("||");
-        groups.entry(key).or_default().push(row);
+        groups.entry(key).or_default().push(row.clone());
     }
 
     if op.aggregate.is_empty() {
@@ -74,7 +74,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn make_data() -> Dataset {
+    fn make_data() -> Vec<Row> {
         vec![
             [("country", json!("US")), ("salary", json!(100.0))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
             [("country", json!("UK")), ("salary", json!(80.0))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn group_no_agg() {
         let op = GroupByOp { field: vec!["country".into()], aggregate: vec![] };
-        let result = apply_group_by(make_data(), op).unwrap();
+        let result = apply_group_by(&make_data(), op).unwrap();
         if let PipelineResult::Array(rows) = result {
             assert_eq!(rows.len(), 2);
         } else {
@@ -100,7 +100,7 @@ mod tests {
             field: vec!["country".into()],
             aggregate: vec![ReduceOp { field: "salary".into(), reducer: Reducer::Sum, alias: Some("total".into()) }],
         };
-        let result = apply_group_by(make_data(), op).unwrap();
+        let result = apply_group_by(&make_data(), op).unwrap();
         if let PipelineResult::Object(map) = result {
             assert_eq!(map.len(), 2);
             let us = map.get("US").unwrap().as_object().unwrap();

@@ -1,6 +1,6 @@
-use crate::types::{DataError, Dataset, ReduceOp, Reducer};
+use crate::types::{DataError, ReduceOp, Reducer, Row};
 
-pub fn apply_reduce(data: &Dataset, op: ReduceOp) -> Result<f64, DataError> {
+pub fn apply_reduce(data: &[Row], op: ReduceOp) -> Result<f64, DataError> {
     let nums: Vec<f64> = data
         .iter()
         .filter_map(|row| row.get(&op.field)?.as_f64())
@@ -39,7 +39,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn data_with_amounts(amounts: &[f64]) -> Dataset {
+    fn data_with_amounts(amounts: &[f64]) -> Vec<Row> {
         amounts
             .iter()
             .map(|&a| {

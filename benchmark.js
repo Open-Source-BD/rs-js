@@ -1,5 +1,5 @@
 'use strict';
-const { process: rsProcess } = require('./js/index.node.cjs');
+const { process: rsProcess, DataEngine } = require('./js/index.node.cjs');
 
 // ─── dataset generator ────────────────────────────────────────────────────────
 
@@ -23,29 +23,37 @@ function generateData(n) {
 
 function hrt() { return Number(process.hrtime.bigint()); }
 
-async function bench(label, jsFn, rsFn, runs = 5) {
+function bench(label, jsFn, processFn, engineFn, runs = 5) {
     // warm-up
-    await jsFn(); await rsFn();
+    jsFn(); processFn(); engineFn();
 
-    const jsTimes = [], rsTimes = [];
+    const jsTimes = [], processTimes = [], engineTimes = [];
 
     for (let i = 0; i < runs; i++) {
-        let t = hrt(); await jsFn(); jsTimes.push(hrt() - t);
-        t = hrt();     await rsFn(); rsTimes.push(hrt() - t);
+        let t;
+        t = hrt(); jsFn();       jsTimes.push(hrt() - t);
+        t = hrt(); processFn();  processTimes.push(hrt() - t);
+        t = hrt(); engineFn();   engineTimes.push(hrt() - t);
     }
 
     const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
     const ms  = ns => (ns / 1e6).toFixed(2);
 
-    const jsAvg = avg(jsTimes);
-    const rsAvg = avg(rsTimes);
-    const ratio = jsAvg / rsAvg;
-    const winner = ratio >= 1
-        ? `rs-js  ${ratio.toFixed(2)}x faster`
-        : `js     ${(1 / ratio).toFixed(2)}x faster`;
+    const jsAvg      = avg(jsTimes);
+    const processAvg = avg(processTimes);
+    const engineAvg  = avg(engineTimes);
+
+    const engineRatio = jsAvg / engineAvg;
+    const engineWinner = engineRatio >= 1
+        ? `engine ${engineRatio.toFixed(1)}x faster`
+        : `js     ${(1 / engineRatio).toFixed(1)}x faster`;
 
     console.log(
-        `  ${label.padEnd(30)} JS: ${ms(jsAvg).padStart(8)} ms   RS: ${ms(rsAvg).padStart(8)} ms   → ${winner}`
+        `  ${label.padEnd(32)}` +
+        `js: ${ms(jsAvg).padStart(8)} ms` +
+        `   process(): ${ms(processAvg).padStart(8)} ms` +
+        `   engine: ${ms(engineAvg).padStart(8)} ms` +
+        `   → ${engineWinner}`
     );
 }
 
@@ -93,7 +101,7 @@ function jsPipeline(data) {
     return groups;
 }
 
-// ─── rs-js operations ─────────────────────────────────────────────────────────
+// ─── operation descriptors ────────────────────────────────────────────────────
 
 const filterOps = [
     { op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 18 }] }
@@ -151,55 +159,67 @@ const pipelineOps = [
 
 // ─── run ──────────────────────────────────────────────────────────────────────
 
-async function run() {
+function run() {
     const SIZES = [10_000, 100_000, 500_000];
 
     for (const n of SIZES) {
-        const data = generateData(n);
+        const data   = generateData(n);
         const findId = Math.floor(n / 2);
 
-        console.log(`\n${'─'.repeat(80)}`);
-        console.log(`  Dataset: ${n.toLocaleString()} rows`);
-        console.log(`${'─'.repeat(80)}`);
+        // DataEngine: deserialize data once into WASM for this dataset size
+        const engine = new DataEngine(data);
 
-        await bench('filter  (age >= 18)',
+        console.log(`\n${'─'.repeat(110)}`);
+        console.log(`  Dataset: ${n.toLocaleString()} rows   (engine loaded ${engine.len().toLocaleString()} rows into WASM)`);
+        console.log(`${'─'.repeat(110)}`);
+
+        bench('filter  (age >= 18)',
             () => jsFilter(data),
-            () => rsProcess(data, filterOps));
+            () => rsProcess(data, filterOps),
+            () => engine.query(filterOps));
 
-        await bench('map     (salary × 0.1)',
+        bench('map     (salary × 0.1)',
             () => jsMap(data),
-            () => rsProcess(data, mapOps));
+            () => rsProcess(data, mapOps),
+            () => engine.query(mapOps));
 
-        await bench('reduce  (sum active salaries)',
+        bench('reduce  (sum active salaries)',
             () => jsReduce(data),
-            () => rsProcess(data, reduceOps));
+            () => rsProcess(data, reduceOps),
+            () => engine.query(reduceOps));
 
-        await bench('count   (age >= 18)',
+        bench('count   (age >= 18)',
             () => jsCount(data),
-            () => rsProcess(data, countOps));
+            () => rsProcess(data, countOps),
+            () => engine.query(countOps));
 
-        await bench('find    (by id)',
+        bench('find    (by id)',
             () => jsFind(data, findId),
-            () => rsProcess(data, [
-                { op: 'find', conditions: [{ field: 'id', operator: 'eq', value: findId }] }
-            ]));
+            () => rsProcess(data, [{ op: 'find', conditions: [{ field: 'id', operator: 'eq', value: findId }] }]),
+            () => engine.query([{ op: 'find', conditions: [{ field: 'id', operator: 'eq', value: findId }] }]));
 
-        await bench('groupBy (by department)',
+        bench('groupBy (by department)',
             () => jsGroupBy(data),
-            () => rsProcess(data, groupByOps));
+            () => rsProcess(data, groupByOps),
+            () => engine.query(groupByOps));
 
-        await bench('groupBy + avg (by country)',
+        bench('groupBy + avg (by country)',
             () => jsGroupByAgg(data),
-            () => rsProcess(data, groupByAggOps));
+            () => rsProcess(data, groupByAggOps),
+            () => engine.query(groupByAggOps));
 
-        await bench('pipeline (filter → groupBy + avg)',
+        bench('pipeline (filter → groupBy + avg)',
             () => jsPipeline(data),
-            () => rsProcess(data, pipelineOps));
+            () => rsProcess(data, pipelineOps),
+            () => engine.query(pipelineOps));
+
+        engine.free();
     }
 
-    console.log(`\n${'─'.repeat(80)}`);
-    console.log('  Note: rs-js times include JS→WASM serialization + deserialization overhead.');
-    console.log(`${'─'.repeat(80)}\n`);
+    console.log(`\n${'─'.repeat(110)}`);
+    console.log('  process(): re-serializes full dataset on every call (includes JS→WASM overhead).');
+    console.log('  engine:    dataset loaded into WASM once; query() only crosses the ops array.');
+    console.log(`${'─'.repeat(110)}\n`);
 }
 
-run().catch(console.error);
+run();

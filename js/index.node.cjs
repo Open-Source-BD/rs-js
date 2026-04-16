@@ -1,10 +1,12 @@
 'use strict';
 
-let processRaw;
+let processRaw, DataEngine;
 
 try {
     // nodejs target auto-loads the .wasm at require time — no initSync needed
-    processRaw = require('../pkg-node/rs_js.js').processRaw;
+    const wasm = require('../pkg-node/rs_js.js');
+    processRaw = wasm.processRaw;
+    DataEngine = wasm.DataEngine;
 } catch {
     throw new Error(
         '\n[rs-js] WASM build not found.\n' +
@@ -26,4 +28,4 @@ function process(data, operations, options) {
     return processRaw(data, operations, options ?? undefined);
 }
 
-module.exports = { process };
+module.exports = { process, DataEngine };

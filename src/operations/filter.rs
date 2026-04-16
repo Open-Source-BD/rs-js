@@ -1,12 +1,13 @@
 use crate::{
     eval::evaluate_conditions,
-    types::{DataError, Dataset, FilterOp},
+    types::{DataError, FilterOp, Row},
 };
 
-pub fn apply_filter(data: Dataset, op: FilterOp) -> Result<Dataset, DataError> {
+pub fn apply_filter(data: &[Row], op: FilterOp) -> Result<Vec<Row>, DataError> {
     Ok(data
-        .into_iter()
+        .iter()
         .filter(|row| evaluate_conditions(row, &op.conditions, &op.logic))
+        .cloned()
         .collect())
 }
 
@@ -16,7 +17,7 @@ mod tests {
     use crate::types::{Condition, ConditionLogic, Operator};
     use serde_json::json;
 
-    fn make_data() -> Dataset {
+    fn make_data() -> Vec<Row> {
         vec![
             [("age", json!(20)), ("name", json!("Alice"))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
             [("age", json!(15)), ("name", json!("Bob"))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
@@ -30,7 +31,7 @@ mod tests {
             conditions: vec![Condition { field: "age".into(), operator: Operator::Gte, value: json!(18) }],
             logic: ConditionLogic::And,
         };
-        let result = apply_filter(make_data(), op).unwrap();
+        let result = apply_filter(&make_data(), op).unwrap();
         assert_eq!(result.len(), 2);
     }
 }

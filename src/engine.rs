@@ -3,8 +3,10 @@ use crate::{
         count::apply_count, filter::apply_filter, find::apply_find,
         group_by::apply_group_by, map::apply_map, reduce::apply_reduce,
     },
-    types::{DataError, Dataset, Operation, PipelineOptions, PipelineResult},
+    types::{DataError, Dataset, Operation, PipelineOptions, PipelineResult, Row},
 };
+
+// ── Legacy path: process_raw() passes owned Dataset ──────────────────────────
 
 pub struct Pipeline {
     data: Dataset,
@@ -21,45 +23,94 @@ impl Pipeline {
         Self { data }
     }
 
-    pub fn execute(mut self, ops: Vec<Operation>) -> Result<PipelineResult, DataError> {
-        if ops.is_empty() {
-            return Err(DataError::EmptyPipeline);
-        }
+    pub fn execute(self, ops: Vec<Operation>) -> Result<PipelineResult, DataError> {
+        execute_on_slice(&self.data, ops)
+    }
+}
 
-        let last_idx = ops.len() - 1;
+// ── Core engine: operates on &[Row] — used by both Pipeline and DataEngine ───
 
-        for (i, op) in ops.into_iter().enumerate() {
-            let is_last = i == last_idx;
-            match op {
-                Operation::Filter(f) if !is_last => {
-                    self.data = apply_filter(self.data, f)?;
-                }
-                Operation::Map(m) if !is_last => {
-                    self.data = apply_map(self.data, m)?;
-                }
-                Operation::Filter(f) => {
-                    return Ok(PipelineResult::Array(apply_filter(self.data, f)?));
-                }
-                Operation::Map(m) => {
-                    return Ok(PipelineResult::Array(apply_map(self.data, m)?));
-                }
-                Operation::Reduce(r) => {
-                    return Ok(PipelineResult::Number(apply_reduce(&self.data, r)?));
-                }
-                Operation::GroupBy(g) => {
-                    return apply_group_by(self.data, g);
-                }
-                Operation::Count(c) => {
-                    return Ok(PipelineResult::Number(apply_count(&self.data, c) as f64));
-                }
-                Operation::Find(f) => {
-                    return Ok(PipelineResult::Item(apply_find(self.data, f)?));
-                }
+/// Execute a pipeline on a borrowed slice.
+/// Intermediate ops (filter, map) produce owned subsets only when needed.
+/// Terminal ops (reduce, count, find, groupBy) read the slice directly.
+pub fn execute_on_slice(data: &[Row], ops: Vec<Operation>) -> Result<PipelineResult, DataError> {
+    if ops.is_empty() {
+        return Err(DataError::EmptyPipeline);
+    }
+
+    // Tracks intermediate owned data produced by filter/map.
+    // None = still referencing the original slice (zero allocation).
+    enum Working<'a> {
+        Slice(&'a [Row]),
+        Owned(Vec<Row>),
+    }
+
+    impl<'a> Working<'a> {
+        fn as_slice(&self) -> &[Row] {
+            match self {
+                Self::Slice(s) => s,
+                Self::Owned(v) => v.as_slice(),
             }
         }
-
-        Ok(PipelineResult::Array(self.data))
+        fn into_owned(self) -> Vec<Row> {
+            match self {
+                Self::Slice(s) => s.to_vec(),
+                Self::Owned(v) => v,
+            }
+        }
     }
+
+    let mut working = Working::Slice(data);
+    let last_idx = ops.len() - 1;
+
+    for (i, op) in ops.into_iter().enumerate() {
+        let is_last = i == last_idx;
+        let current = working.as_slice();
+
+        match op {
+            Operation::Filter(f) if !is_last => {
+                working = Working::Owned(apply_filter(current, f)?);
+            }
+            Operation::Map(m) if !is_last => {
+                working = Working::Owned(apply_map(current, m)?);
+            }
+            Operation::Filter(f) => {
+                return Ok(PipelineResult::Array(apply_filter(current, f)?));
+            }
+            Operation::Map(m) => {
+                return Ok(PipelineResult::Array(apply_map(current, m)?));
+            }
+            Operation::Reduce(r) => {
+                return Ok(PipelineResult::Number(apply_reduce(current, r)?));
+            }
+            Operation::GroupBy(g) => {
+                return apply_group_by(current, g);
+            }
+            Operation::Count(c) => {
+                return Ok(PipelineResult::Number(apply_count(current, c) as f64));
+            }
+            Operation::Find(f) => {
+                return Ok(PipelineResult::Item(apply_find(current, f)?));
+            }
+        }
+    }
+
+    Ok(PipelineResult::Array(working.into_owned()))
+}
+
+// ── DataEngine: offset/limit applied before entering execute_on_slice ─────────
+
+pub fn execute_for_engine(
+    data: &[Row],
+    opts: PipelineOptions,
+    ops: Vec<Operation>,
+) -> Result<PipelineResult, DataError> {
+    let start = opts.offset.unwrap_or(0).min(data.len());
+    let end = opts
+        .limit
+        .map(|l| (start + l).min(data.len()))
+        .unwrap_or(data.len());
+    execute_on_slice(&data[start..end], ops)
 }
 
 #[cfg(test)]
@@ -71,13 +122,9 @@ mod tests {
     fn make_data() -> Dataset {
         vec![
             [("age", json!(20)), ("salary", json!(50000.0)), ("country", json!("US"))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
-            [("age", json!(15)), ("salary", json!(0.0)), ("country", json!("UK"))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
+            [("age", json!(15)), ("salary", json!(0.0)),     ("country", json!("UK"))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
             [("age", json!(30)), ("salary", json!(80000.0)), ("country", json!("US"))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
         ]
-    }
-
-    fn pipeline(data: Dataset) -> Pipeline {
-        Pipeline::new(data, PipelineOptions::default())
     }
 
     #[test]
@@ -89,12 +136,9 @@ mod tests {
             }),
             Operation::Count(CountOp { field: None }),
         ];
-        let result = pipeline(make_data()).execute(ops).unwrap();
-        if let PipelineResult::Number(n) = result {
+        if let PipelineResult::Number(n) = execute_on_slice(&make_data(), ops).unwrap() {
             assert_eq!(n, 2.0);
-        } else {
-            panic!("expected Number");
-        }
+        } else { panic!("expected Number"); }
     }
 
     #[test]
@@ -106,20 +150,32 @@ mod tests {
             }),
             Operation::Reduce(ReduceOp { field: "salary".into(), reducer: Reducer::Sum, alias: None }),
         ];
-        let result = pipeline(make_data()).execute(ops).unwrap();
-        if let PipelineResult::Number(n) = result {
+        if let PipelineResult::Number(n) = execute_on_slice(&make_data(), ops).unwrap() {
             assert_eq!(n, 130000.0);
-        } else {
-            panic!("expected Number");
-        }
+        } else { panic!("expected Number"); }
     }
 
     #[test]
     fn limit_option() {
-        let p = Pipeline::new(make_data(), PipelineOptions { limit: Some(1), ..Default::default() });
-        let ops = vec![Operation::Count(CountOp { field: None })];
-        if let PipelineResult::Number(n) = p.execute(ops).unwrap() {
+        let result = execute_for_engine(
+            &make_data(),
+            PipelineOptions { limit: Some(1), ..Default::default() },
+            vec![Operation::Count(CountOp { field: None })],
+        ).unwrap();
+        if let PipelineResult::Number(n) = result {
             assert_eq!(n, 1.0);
+        }
+    }
+
+    #[test]
+    fn engine_reduce_zero_copy() {
+        // reduce on full slice — should not clone any rows
+        let data = make_data();
+        let ops = vec![
+            Operation::Reduce(ReduceOp { field: "salary".into(), reducer: Reducer::Sum, alias: None }),
+        ];
+        if let PipelineResult::Number(n) = execute_on_slice(&data, ops).unwrap() {
+            assert_eq!(n, 130000.0);
         }
     }
 }
