@@ -5,7 +5,7 @@ mod operations;
 mod types;
 
 use column_store::{Col, ColumnStore, try_columnar};
-use engine::{Pipeline, execute_for_engine};
+use engine::execute_for_engine;
 use js_sys::{Array, Float64Array, Object, Uint8Array, Uint16Array, Uint32Array};
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::Serializer;
@@ -159,38 +159,86 @@ impl DataEngine {
             }
             _ => (start as u32..end as u32).collect(),
         };
+        let n = indices.len();
 
+        // Stable column order
+        let col_refs: Vec<(&str, &Col)> = self.col_store.cols.iter()
+            .map(|(k, v)| (k.as_str(), v))
+            .collect();
+
+        // Per-column output buffers — typed to avoid branching in the hot loop
+        enum ColBuf {
+            F64(Vec<f64>),
+            Bool(Vec<u8>),
+            StrCodes(Vec<u16>),
+        }
+
+        let mut bufs: Vec<ColBuf> = col_refs.iter().map(|(_, col)| match col {
+            Col::F64(_)  => ColBuf::F64(Vec::with_capacity(n)),
+            Col::Bool(_) => ColBuf::Bool(Vec::with_capacity(n)),
+            Col::Str(_)  => ColBuf::StrCodes(Vec::with_capacity(n)),
+        }).collect();
+
+        // Single pass through indices — fills all column buffers at once.
+        // Traversing the indices Vec once (instead of ncols times) cuts cache
+        // pressure proportional to the number of columns.
+        for &raw_i in &indices {
+            let i = raw_i as usize;
+            for j in 0..col_refs.len() {
+                match (&mut bufs[j], col_refs[j].1) {
+                    (ColBuf::F64(buf), Col::F64(v))       => buf.push(v[i]),
+                    (ColBuf::Bool(buf), Col::Bool(v))     => buf.push(v[i]),
+                    (ColBuf::StrCodes(buf), Col::Str(sc)) => buf.push(sc.codes[i]),
+                    _ => {}
+                }
+            }
+        }
+
+        // Emit JS typed arrays
         let out = Object::new();
-        for (name, col) in &self.col_store.cols {
-            let val: JsValue = match col {
-                Col::F64(v) => {
-                    let arr = Float64Array::new_with_length(indices.len() as u32);
-                    let gathered: Vec<f64> = indices.iter().map(|&i| v[i as usize]).collect();
-                    arr.copy_from(&gathered);
+        for j in 0..col_refs.len() {
+            let name = col_refs[j].0;
+            let val: JsValue = match (&bufs[j], col_refs[j].1) {
+                (ColBuf::F64(v), Col::F64(_)) => {
+                    let arr = Float64Array::new_with_length(v.len() as u32);
+                    arr.copy_from(v);
                     arr.into()
                 }
-                Col::Bool(v) => {
-                    let arr = Uint8Array::new_with_length(indices.len() as u32);
-                    let gathered: Vec<u8> = indices.iter().map(|&i| v[i as usize]).collect();
-                    arr.copy_from(&gathered);
+                (ColBuf::Bool(v), Col::Bool(_)) => {
+                    let arr = Uint8Array::new_with_length(v.len() as u32);
+                    arr.copy_from(v);
                     arr.into()
                 }
-                Col::Str(sc) => {
-                    let codes_arr = Uint16Array::new_with_length(indices.len() as u32);
-                    let gathered: Vec<u16> =
-                        indices.iter().map(|&i| sc.codes[i as usize]).collect();
-                    codes_arr.copy_from(&gathered);
-                    let cats_arr = Array::new();
-                    for cat in &sc.categories {
-                        cats_arr.push(&JsValue::from(cat.as_deref().unwrap_or("null")));
-                    }
+                (ColBuf::StrCodes(codes), Col::Str(sc)) => {
+                    let codes_arr = Uint16Array::new_with_length(codes.len() as u32);
+                    codes_arr.copy_from(codes);
+
+                    // For high-cardinality columns (e.g. unique name per row),
+                    // JSON.parse is orders of magnitude faster than 500K individual
+                    // Array::push() calls across the WASM→JS boundary.
+                    let cats_val: JsValue = if sc.categories.len() > 500 {
+                        let json = serde_json::to_string(
+                            &sc.categories.iter()
+                                .map(|c| c.as_deref().unwrap_or("null"))
+                                .collect::<Vec<_>>()
+                        ).unwrap_or_else(|_| "[]".to_string());
+                        js_sys::JSON::parse(&json).unwrap_or(JsValue::UNDEFINED)
+                    } else {
+                        let cats_arr = Array::new();
+                        for cat in &sc.categories {
+                            cats_arr.push(&JsValue::from(cat.as_deref().unwrap_or("null")));
+                        }
+                        cats_arr.into()
+                    };
+
                     let obj = Object::new();
                     js_sys::Reflect::set(&obj, &"codes".into(), &codes_arr.into())?;
-                    js_sys::Reflect::set(&obj, &"categories".into(), &cats_arr.into())?;
+                    js_sys::Reflect::set(&obj, &"categories".into(), &cats_val)?;
                     obj.into()
                 }
+                _ => continue,
             };
-            js_sys::Reflect::set(&out, &JsValue::from(&**name), &val)?;
+            js_sys::Reflect::set(&out, &JsValue::from(name), &val)?;
         }
         Ok(out.into())
     }

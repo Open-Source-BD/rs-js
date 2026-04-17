@@ -75,9 +75,17 @@ class DataEngine {
         this._data = data;
         this._engine = new InternalDataEngine(data);
         this._prepared = new Map();
-        this._smallRowThreshold = Number.isInteger(options.smallRowThreshold)
-            ? options.smallRowThreshold
-            : 2000;
+        // Per-operation crossover thresholds (tuned from benchmarks).
+        // smallRowThreshold overrides all for backward compatibility.
+        if (Number.isInteger(options.smallRowThreshold)) {
+            this._filterThreshold  = options.smallRowThreshold;
+            this._mapThreshold     = options.smallRowThreshold;
+            this._groupByThreshold = options.smallRowThreshold;
+        } else {
+            this._filterThreshold  = Number.isInteger(options.filterThreshold)  ? options.filterThreshold  : 15_000;
+            this._mapThreshold     = Number.isInteger(options.mapThreshold)     ? options.mapThreshold     : 300_000;
+            this._groupByThreshold = Number.isInteger(options.groupByThreshold) ? options.groupByThreshold : 2_000;
+        }
     }
 
     _getPrepared(operations) {
@@ -92,7 +100,7 @@ class DataEngine {
 
     _queryFilter(op, options) {
         const windowed = applyWindow(this._data, options);
-        if (windowed.length <= this._smallRowThreshold) {
+        if (windowed.length <= this._filterThreshold) {
             const rows = windowed.filter((r) => evalConditions(r, op.conditions, op.logic));
             return { type: 'array', value: rows };
         }
@@ -105,7 +113,7 @@ class DataEngine {
 
     _queryMap(op, options) {
         const windowed = applyWindow(this._data, options);
-        if (windowed.length <= this._smallRowThreshold) {
+        if (windowed.length <= this._mapThreshold) {
             const rows = windowed.map((row) => {
                 const out = { ...row };
                 for (const t of op.transforms) out[t.field] = evalMapExpr(out, t.expr);
@@ -120,11 +128,15 @@ class DataEngine {
         const entries = Object.entries(computed);
         const n_fields = entries.length;
 
+        // Pre-extract source keys once to avoid per-row property enumeration.
+        const srcKeys = n > 0 ? Object.keys(windowed[0]) : [];
+        const srcLen = srcKeys.length;
+
         for (let i = 0; i < n; i++) {
-            const row = { ...windowed[i] };
-            for (let j = 0; j < n_fields; j++) {
-                row[entries[j][0]] = entries[j][1][i];
-            }
+            const src = windowed[i];
+            const row = {};
+            for (let k = 0; k < srcLen; k++) row[srcKeys[k]] = src[srcKeys[k]];
+            for (let j = 0; j < n_fields; j++) row[entries[j][0]] = entries[j][1][i];
             rows[i] = row;
         }
         return { type: 'array', value: rows };
@@ -136,7 +148,7 @@ class DataEngine {
 
         const field = fields[0];
         const windowed = applyWindow(this._data, options);
-        if (windowed.length <= this._smallRowThreshold) {
+        if (windowed.length <= this._groupByThreshold) {
             const groups = {};
             for (const row of windowed) {
                 const key = row[field] == null ? 'null' : String(row[field]);

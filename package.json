@@ -17,7 +17,8 @@
     "build:bundler": "wasm-pack build --release --target bundler --out-dir pkg",
     "build:all": "npm run build && npm run build:web && npm run build:bundler",
     "test:rust": "cargo test",
-    "test": "jest"
+    "test": "jest",
+    "benchmark": "node benchmark.js"
   },
   "files": [
     "js/",
