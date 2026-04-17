@@ -49,11 +49,28 @@ export declare function process(
     options?: PipelineOptions,
 ): Promise<PipelineResult>;
 
+export interface StrColumnView {
+    codes: Uint16Array;
+    categories: string[];
+}
+
+export type ColumnView = Float64Array | Uint8Array | StrColumnView;
+
+export interface FilterView {
+    [field: string]: ColumnView;
+}
+
 export declare class DataEngine {
     constructor(data: Record<string, unknown>[]);
     query(operations: Operation[], options?: PipelineOptions): PipelineResult;
-    /** Returns matching row indices as Uint32Array. Reconstruct: Array.from(idx, i => data[i]) */
+    /** Returns matching row indices as Uint32Array. Reconstruct: `const n=idx.length; const out=new Array(n); for(let i=0;i<n;i++) out[i]=data[idx[i]];` */
     filterIndices(operations: Operation[], options?: PipelineOptions): Uint32Array;
+    /** Returns columnar typed arrays for matching rows — no per-row object serialization. */
+    filterView(operations: Operation[], options?: PipelineOptions): FilterView;
+    /** Returns `{ fieldName: Float64Array }` for each computed map transform. */
+    mapField(operations: Operation[], options?: PipelineOptions): Record<string, Float64Array>;
+    /** Returns `{ groupKey: Uint32Array }` of row indices per group. No row serialization. */
+    groupByIndices(field: string): Record<string, Uint32Array>;
     len(): number;
     is_empty(): boolean;
     free(): void;

@@ -4,9 +4,9 @@ mod eval;
 mod operations;
 mod types;
 
-use column_store::{try_columnar, ColumnStore};
+use column_store::{try_columnar, Col, ColumnStore};
 use engine::{execute_for_engine, Pipeline};
-use js_sys::Uint32Array;
+use js_sys::{Array, Float64Array, Object, Uint16Array, Uint32Array, Uint8Array};
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::Serializer;
 use types::{DataError, Dataset, Operation, PipelineOptions};
@@ -103,6 +103,105 @@ impl DataEngine {
         let arr = Uint32Array::new_with_length(indices.len() as u32);
         arr.copy_from(&indices);
         Ok(arr)
+    }
+
+    /// Returns `{ group_key: Uint32Array }` — zero row serialization.
+    /// JS reconstructs: `for ([k,v] of Object.entries(idx)) result[k] = Array.from(v, i=>data[i])`
+    #[wasm_bindgen(js_name = "groupByIndices")]
+    pub fn group_by_indices(&self, field: &str) -> Result<JsValue, JsValue> {
+        let groups = self.col_store.group_by_indices_raw(field, None, 0, self.col_store.len);
+        let obj = Object::new();
+        for (key, indices) in groups {
+            let arr = Uint32Array::new_with_length(indices.len() as u32);
+            arr.copy_from(&indices);
+            js_sys::Reflect::set(&obj, &JsValue::from(&*key), &arr.into())?;
+        }
+        Ok(obj.into())
+    }
+
+    /// Returns columnar typed arrays for matching rows — no per-row object serialization.
+    /// F64 fields → Float64Array. Bool fields → Uint8Array.
+    /// Str fields → `{ codes: Uint16Array, categories: string[] }`.
+    #[wasm_bindgen(js_name = "filterView")]
+    pub fn filter_view(
+        &self,
+        operations: JsValue,
+        options: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let ops  = deserialize_ops(operations)?;
+        let opts = deserialize_opts(options)?;
+        let start = opts.offset.unwrap_or(0).min(self.col_store.len);
+        let end   = opts.limit
+            .map(|l| (start + l).min(self.col_store.len))
+            .unwrap_or(self.col_store.len);
+
+        let indices: Vec<u32> = match ops.as_slice() {
+            [Operation::Filter(f)] =>
+                self.col_store.filter_indices(&f.conditions, &f.logic, start, end),
+            _ => (start as u32..end as u32).collect(),
+        };
+
+        let out = Object::new();
+        for (name, col) in &self.col_store.cols {
+            let val: JsValue = match col {
+                Col::F64(v) => {
+                    let arr = Float64Array::new_with_length(indices.len() as u32);
+                    let gathered: Vec<f64> = indices.iter().map(|&i| v[i as usize]).collect();
+                    arr.copy_from(&gathered);
+                    arr.into()
+                }
+                Col::Bool(v) => {
+                    let arr = Uint8Array::new_with_length(indices.len() as u32);
+                    let gathered: Vec<u8> = indices.iter().map(|&i| v[i as usize]).collect();
+                    arr.copy_from(&gathered);
+                    arr.into()
+                }
+                Col::Str(sc) => {
+                    let codes_arr = Uint16Array::new_with_length(indices.len() as u32);
+                    let gathered: Vec<u16> = indices.iter().map(|&i| sc.codes[i as usize]).collect();
+                    codes_arr.copy_from(&gathered);
+                    let cats_arr = Array::new();
+                    for cat in &sc.categories {
+                        cats_arr.push(&JsValue::from(cat.as_deref().unwrap_or("null")));
+                    }
+                    let obj = Object::new();
+                    js_sys::Reflect::set(&obj, &"codes".into(),      &codes_arr.into())?;
+                    js_sys::Reflect::set(&obj, &"categories".into(), &cats_arr.into())?;
+                    obj.into()
+                }
+            };
+            js_sys::Reflect::set(&out, &JsValue::from(&**name), &val)?;
+        }
+        Ok(out.into())
+    }
+
+    /// Compute new field(s) from map ops — returns `{ fieldName: Float64Array }`.
+    /// Only the computed columns, not full rows. Use for arithmetic transforms.
+    #[wasm_bindgen(js_name = "mapField")]
+    pub fn map_field(
+        &self,
+        operations: JsValue,
+        options: Option<JsValue>,
+    ) -> Result<JsValue, JsValue> {
+        let ops  = deserialize_ops(operations)?;
+        let opts = deserialize_opts(options)?;
+        let start = opts.offset.unwrap_or(0).min(self.col_store.len);
+        let end   = opts.limit
+            .map(|l| (start + l).min(self.col_store.len))
+            .unwrap_or(self.col_store.len);
+
+        let out = Object::new();
+        for op in &ops {
+            if let Operation::Map(m) = op {
+                for transform in &m.transforms {
+                    let vals = self.col_store.compute_field(&transform.expr, start, end);
+                    let arr  = Float64Array::new_with_length(vals.len() as u32);
+                    arr.copy_from(&vals);
+                    js_sys::Reflect::set(&out, &JsValue::from(&*transform.field), &arr.into())?;
+                }
+            }
+        }
+        Ok(out.into())
     }
 
     pub fn len(&self) -> usize {

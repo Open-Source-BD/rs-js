@@ -1,6 +1,6 @@
 use crate::types::{
-    Condition, ConditionLogic, DataError, GroupByOp, Operation, Operator, PipelineResult,
-    ReduceOp, Reducer, Row,
+    ArithOp, Condition, ConditionLogic, DataError, GroupByOp, MapExpr, Operation, Operator,
+    PipelineResult, ReduceOp, Reducer, Row,
 };
 use indexmap::IndexMap;
 use serde_json::Value;
@@ -73,7 +73,7 @@ impl AggBuf {
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 pub(crate) struct ColumnStore {
-    cols: IndexMap<String, Col>,
+    pub(crate) cols: IndexMap<String, Col>,
     pub len: usize,
 }
 
@@ -226,6 +226,45 @@ impl ColumnStore {
             .filter(|&i| eval_all(&resolved, i, logic))
             .map(|i| i as u32)
             .collect()
+    }
+
+    // ── groupBy → index buckets per group (no row serialization) ─────────────
+
+    pub fn group_by_indices_raw(
+        &self,
+        field: &str,
+        filter: Option<(&[Condition], &ConditionLogic)>,
+        start: usize,
+        end: usize,
+    ) -> Vec<(String, Vec<u32>)> {
+        let Some(Col::Str(key_col)) = self.cols.get(field) else { return vec![]; };
+        let n_cats = key_col.categories.len();
+        let codes  = key_col.codes.as_slice();
+        let mut buckets: Vec<Vec<u32>> = vec![vec![]; n_cats];
+
+        if let Some((conds, logic)) = filter {
+            let res = resolve(&self.cols, conds);
+            for i in start..end {
+                if eval_all(&res, i, logic) {
+                    buckets[codes[i] as usize].push(i as u32);
+                }
+            }
+        } else {
+            for i in start..end {
+                buckets[codes[i] as usize].push(i as u32);
+            }
+        }
+
+        key_col.categories.iter().zip(buckets)
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(cat, v)| (cat.clone().unwrap_or_else(|| "null".into()), v))
+            .collect()
+    }
+
+    // ── compute a single field via MapExpr (returns Float64 column) ───────────
+
+    pub fn compute_field(&self, expr: &MapExpr, start: usize, end: usize) -> Vec<f64> {
+        (start..end).map(|i| eval_map_expr(&self.cols, expr, i)).collect()
     }
 
     // ── groupBy with aggregates ───────────────────────────────────────────────
@@ -632,6 +671,27 @@ pub(crate) fn try_columnar(
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn eval_map_expr(cols: &IndexMap<String, Col>, expr: &MapExpr, i: usize) -> f64 {
+    match expr {
+        MapExpr::Literal { value } => value.as_f64().unwrap_or(f64::NAN),
+        MapExpr::Field { name } => match cols.get(name) {
+            Some(Col::F64(v)) => v[i],
+            _ => f64::NAN,
+        },
+        MapExpr::Arithmetic { op, left, right } => {
+            let l = eval_map_expr(cols, left, i);
+            let r = eval_map_expr(cols, right, i);
+            match op {
+                ArithOp::Add => l + r,
+                ArithOp::Sub => l - r,
+                ArithOp::Mul => l * r,
+                ArithOp::Div => l / r,
+            }
+        }
+        MapExpr::Template { .. } => f64::NAN,
+    }
+}
 
 fn col_val_str(cols: &IndexMap<String, Col>, field: &str, i: usize) -> String {
     match cols.get(field) {

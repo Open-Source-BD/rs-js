@@ -23,50 +23,78 @@ function generateData(n) {
 
 function hrt() { return Number(process.hrtime.bigint()); }
 
-function bench(label, fns, runs = 5) {
-    // warm-up
-    for (const fn of fns) fn();
+function fmtMs(ns) { return (ns / 1e6).toFixed(2) + ' ms'; }
+
+function bench(label, fns, col4name = null, runs = 5) {
+    for (const fn of fns) fn();            // warm-up
 
     const times = fns.map(() => []);
-
-    for (let i = 0; i < runs; i++) {
+    for (let i = 0; i < runs; i++)
         for (let j = 0; j < fns.length; j++) {
             const t = hrt(); fns[j](); times[j].push(hrt() - t);
         }
-    }
 
-    const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
-    const ms  = ns => (ns / 1e6).toFixed(2);
-
+    const avg  = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
     const avgs = times.map(avg);
     const jsAvg = avgs[0];
 
-    const cols = [
-        `js: ${ms(avgs[0]).padStart(8)} ms`,
-        `process(): ${ms(avgs[1]).padStart(8)} ms`,
-        `engine: ${ms(avgs[2]).padStart(8)} ms`,
-    ];
-    if (avgs[3] !== undefined) {
-        cols.push(`filterIdx: ${ms(avgs[3]).padStart(8)} ms`);
-    }
-
-    // winner vs JS
-    const best = avgs.slice(2).reduce((b, v, i) => v < b.v ? { v, i: i + 2 } : b, { v: jsAvg, i: 0 });
-    const names = ['js', 'process()', 'engine', 'filterIdx'];
+    const best = avgs.slice(2).reduce(
+        (b, v, i) => v < b.v ? { v, i: i + 2 } : b,
+        { v: jsAvg, i: 0 }
+    );
+    const names  = ['js', 'process()', 'engine', col4name];
     const winner = best.i === 0
-        ? `js wins`
+        ? 'js wins'
         : `${names[best.i]} ${(jsAvg / best.v).toFixed(1)}x faster than js`;
 
-    console.log(`  ${label.padEnd(34)}${cols.join('   ')}   → ${winner}`);
+    return { label, avgs, col4name, winner };
+}
+
+// ─── table printer ────────────────────────────────────────────────────────────
+
+function printSection(n, rows) {
+    const WO = 36, WT = 10, WA = 22, WW = 33;
+    const R = (s, w) => String(s).padStart(w);
+    const L = (s, w) => String(s).padEnd(w);
+
+    const hline = (tl, jn, tr, f) =>
+        `${tl}${f.repeat(WO + 2)}${jn}${f.repeat(WT + 2)}${jn}${f.repeat(WT + 2)}${jn}${f.repeat(WT + 2)}${jn}${f.repeat(WA + 2)}${jn}${f.repeat(WW + 2)}${tr}`;
+
+    const dataRow = (op, js, pr, en, alt, wi) =>
+        `│ ${L(op, WO)} │ ${R(js, WT)} │ ${R(pr, WT)} │ ${R(en, WT)} │ ${R(alt, WA)} │ ${L(wi, WW)} │`;
+
+    const headRow = () =>
+        `│ ${L('Operation', WO)} │ ${L('js', WT)} │ ${L('process()', WT)} │ ${L('engine', WT)} │ ${L('fast path', WA)} │ ${L('Winner', WW)} │`;
+
+    console.log(`\n  Dataset: ${n.toLocaleString()} rows\n`);
+    console.log(hline('┌', '┬', '┐', '─'));
+    console.log(headRow());
+    console.log(hline('├', '┼', '┤', '─'));
+
+    for (const { label, avgs, col4name, winner } of rows) {
+        const alt = avgs[3] !== undefined
+            ? `${col4name}: ${fmtMs(avgs[3])}`
+            : '—';
+        console.log(dataRow(
+            label,
+            fmtMs(avgs[0]),
+            fmtMs(avgs[1]),
+            fmtMs(avgs[2]),
+            alt,
+            winner,
+        ));
+    }
+
+    console.log(hline('└', '┴', '┘', '─'));
 }
 
 // ─── pure-JS implementations ──────────────────────────────────────────────────
 
-function jsFilter(data)  { return data.filter(r => r.age >= 18); }
-function jsMap(data)     { return data.map(r => ({ ...r, bonus: r.salary * 0.1 })); }
-function jsReduce(data)  { return data.filter(r => r.active).reduce((s, r) => s + r.salary, 0); }
-function jsCount(data)   { return data.filter(r => r.age >= 18).length; }
-function jsFind(data, id){ return data.find(r => r.id === id) ?? null; }
+function jsFilter(data)   { return data.filter(r => r.age >= 18); }
+function jsMap(data)      { return data.map(r => ({ ...r, bonus: r.salary * 0.1 })); }
+function jsReduce(data)   { return data.filter(r => r.active).reduce((s, r) => s + r.salary, 0); }
+function jsCount(data)    { return data.filter(r => r.age >= 18).length; }
+function jsFind(data, id) { return data.find(r => r.id === id) ?? null; }
 
 function jsGroupBy(data) {
     return data.reduce((acc, r) => {
@@ -126,7 +154,7 @@ const countOps = [
     { op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 18 }] },
     { op: 'count' }
 ];
-const groupByOps   = [{ op: 'groupBy', field: 'department' }];
+const groupByOps    = [{ op: 'groupBy', field: 'department' }];
 const groupByAggOps = [{
     op: 'groupBy', field: 'country',
     aggregate: [{ field: 'salary', reducer: 'avg', alias: 'avg_salary' }]
@@ -149,67 +177,95 @@ function run() {
         const data   = generateData(n);
         const findId = Math.floor(n / 2);
         const engine = new DataEngine(data);
+        const rows   = [];
 
-        console.log(`\n${'─'.repeat(120)}`);
-        console.log(`  Dataset: ${n.toLocaleString()} rows`);
-        console.log(`${'─'.repeat(120)}`);
-
-        bench('filter  (age >= 18)', [
+        rows.push(bench('filter  (age >= 18)', [
             () => jsFilter(data),
             () => rsProcess(data, filterOps),
             () => engine.query(filterOps),
-            () => { const idx = engine.filterIndices(filterOps); const n = idx.length; const out = new Array(n); for (let i = 0; i < n; i++) out[i] = data[idx[i]]; return out; },
-        ]);
+            () => { const idx = engine.filterIndices(filterOps); const m = idx.length; const out = new Array(m); for (let i = 0; i < m; i++) out[i] = data[idx[i]]; return out; },
+        ], 'filterIdx'));
 
-        bench('map     (salary × 0.1)', [
+        rows.push(bench('map     (salary × 0.1)', [
             () => jsMap(data),
             () => rsProcess(data, mapOps),
             () => engine.query(mapOps),
-        ]);
+        ]));
 
-        bench('reduce  (sum active salaries)', [
+        rows.push(bench('reduce  (sum active salaries)', [
             () => jsReduce(data),
             () => rsProcess(data, reduceOps),
             () => engine.query(reduceOps),
-        ]);
+        ]));
 
-        bench('count   (age >= 18)', [
+        rows.push(bench('count   (age >= 18)', [
             () => jsCount(data),
             () => rsProcess(data, countOps),
             () => engine.query(countOps),
-        ]);
+        ]));
 
-        bench('find    (by id)', [
+        rows.push(bench('find    (by id)', [
             () => jsFind(data, findId),
             () => rsProcess(data, [{ op: 'find', conditions: [{ field: 'id', operator: 'eq', value: findId }] }]),
             () => engine.query([{ op: 'find', conditions: [{ field: 'id', operator: 'eq', value: findId }] }]),
-        ]);
+        ]));
 
-        bench('groupBy (by department)', [
+        rows.push(bench('groupBy (by department)', [
             () => jsGroupBy(data),
             () => rsProcess(data, groupByOps),
             () => engine.query(groupByOps),
-        ]);
+        ]));
 
-        bench('groupBy + avg (by country)', [
+        rows.push(bench('groupBy + avg (by country)', [
             () => jsGroupByAgg(data),
             () => rsProcess(data, groupByAggOps),
             () => engine.query(groupByAggOps),
-        ]);
+        ]));
 
-        bench('pipeline (filter → groupBy + avg)', [
+        rows.push(bench('pipeline (filter → groupBy + avg)', [
             () => jsPipeline(data),
             () => rsProcess(data, pipelineOps),
             () => engine.query(pipelineOps),
-        ]);
+        ]));
 
+        rows.push(bench('filterView  (columnar, age >= 18)', [
+            () => jsFilter(data),
+            () => rsProcess(data, filterOps),
+            () => engine.query(filterOps),
+            () => engine.filterView(filterOps),
+        ], 'filterView'));
+
+        rows.push(bench('mapField    (bonus col only)', [
+            () => jsMap(data),
+            () => rsProcess(data, mapOps),
+            () => engine.query(mapOps),
+            () => engine.mapField(mapOps),
+        ], 'mapField'));
+
+        rows.push(bench('groupByIdx  (by department)', [
+            () => jsGroupBy(data),
+            () => rsProcess(data, groupByOps),
+            () => engine.query(groupByOps),
+            () => {
+                const idx = engine.groupByIndices('department');
+                const r = {};
+                for (const [k, v] of Object.entries(idx)) {
+                    const m = v.length; const gr = new Array(m);
+                    for (let i = 0; i < m; i++) gr[i] = data[v[i]];
+                    r[k] = gr;
+                }
+                return r;
+            },
+        ], 'groupByIdx'));
+
+        printSection(n, rows);
         engine.free();
     }
 
-    console.log(`\n${'─'.repeat(120)}`);
-    console.log('  engine / filterIdx: columnar fast path — no row cloning, no per-row hash lookups.');
-    console.log('  process():          row-based + full dataset serialized on every call.');
-    console.log(`${'─'.repeat(120)}\n`);
+    console.log('\n  Notes:');
+    console.log('  · fast path = typed-array API — no per-row object serialization.');
+    console.log('  · engine (filter/map/groupBy rows) = serde wall — WASM must serialize N row objects.');
+    console.log('  · process() = row-based + full dataset deserialized on every call.\n');
 }
 
 run();
