@@ -158,7 +158,7 @@ function run() {
             () => jsFilter(data),
             () => rsProcess(data, filterOps),
             () => engine.query(filterOps),
-            () => { const idx = engine.filterIndices(filterOps); return Array.from(idx, i => data[i]); },
+            () => { const idx = engine.filterIndices(filterOps); const n = idx.length; const out = new Array(n); for (let i = 0; i < n; i++) out[i] = data[idx[i]]; return out; },
         ]);
 
         bench('map     (salary × 0.1)', [

@@ -7,10 +7,67 @@ use serde_json::Value;
 
 // ── Column representation ─────────────────────────────────────────────────────
 
+pub(crate) struct StrColumn {
+    pub codes:      Vec<u16>,            // per-row: index into categories[]
+    pub categories: Vec<Option<String>>, // unique values in insertion order
+}
+
 pub(crate) enum Col {
-    F64(Vec<f64>),            // f64::NAN = null / missing
-    Bool(Vec<u8>),            // 0 = false · 1 = true · 255 = null
-    Str(Vec<Option<String>>), // None = null
+    F64(Vec<f64>),   // f64::NAN = null / missing
+    Bool(Vec<u8>),   // 0 = false · 1 = true · 255 = null
+    Str(StrColumn),  // categorical: codes[i] indexes into categories[]
+}
+
+// ── Per-aggregate lean accumulator (only allocates what the reducer needs) ────
+
+enum AggBuf {
+    SumAvg { sums: Vec<f64>,  cnts: Vec<usize> },
+    Min    { vals: Vec<f64>,  cnts: Vec<usize> },
+    Max    { vals: Vec<f64>,  cnts: Vec<usize> },
+    First  { vals: Vec<f64>,  found: Vec<bool> },
+    Last   { vals: Vec<f64> },
+}
+
+impl AggBuf {
+    fn new(reducer: &Reducer, n: usize) -> Self {
+        match reducer {
+            Reducer::Sum | Reducer::Avg =>
+                AggBuf::SumAvg { sums: vec![0.0; n], cnts: vec![0; n] },
+            Reducer::Min =>
+                AggBuf::Min { vals: vec![f64::INFINITY; n], cnts: vec![0; n] },
+            Reducer::Max =>
+                AggBuf::Max { vals: vec![f64::NEG_INFINITY; n], cnts: vec![0; n] },
+            Reducer::First =>
+                AggBuf::First { vals: vec![0.0; n], found: vec![false; n] },
+            Reducer::Last =>
+                AggBuf::Last { vals: vec![0.0; n] },
+        }
+    }
+
+    #[inline(always)]
+    fn update(&mut self, g: usize, v: f64) {
+        match self {
+            AggBuf::SumAvg { sums, cnts }  => { sums[g] += v; cnts[g] += 1; }
+            AggBuf::Min    { vals, cnts }  => { if v < vals[g] { vals[g] = v; } cnts[g] += 1; }
+            AggBuf::Max    { vals, cnts }  => { if v > vals[g] { vals[g] = v; } cnts[g] += 1; }
+            AggBuf::First  { vals, found } => { if !found[g] { vals[g] = v; found[g] = true; } }
+            AggBuf::Last   { vals }        => { vals[g] = v; }
+        }
+    }
+
+    fn result(&self, g: usize, reducer: &Reducer) -> f64 {
+        match (self, reducer) {
+            (AggBuf::SumAvg { sums, .. }, Reducer::Sum) => sums[g],
+            (AggBuf::SumAvg { sums, cnts }, Reducer::Avg) => {
+                let n = cnts[g]; if n > 0 { sums[g] / n as f64 } else { 0.0 }
+            }
+            (AggBuf::Min { vals, cnts }, Reducer::Min) => if cnts[g] > 0 { vals[g] } else { 0.0 },
+            (AggBuf::Max { vals, cnts }, Reducer::Max) => if cnts[g] > 0 { vals[g] } else { 0.0 },
+            (AggBuf::First { vals, found }, Reducer::First) => if found[g] { vals[g] } else { 0.0 },
+            (AggBuf::Last  { vals }, Reducer::Last) => vals[g],
+            _ => 0.0,
+        }
+    }
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -47,15 +104,13 @@ impl ColumnStore {
         (start..end)
             .filter(|&i| {
                 if let Some((ref res, logic)) = resolved {
-                    if !eval_all(res, i, logic) {
-                        return false;
-                    }
+                    if !eval_all(res, i, logic) { return false; }
                 }
                 if let Some(f) = truthy_field {
                     match self.cols.get(f) {
                         Some(Col::Bool(v)) => v[i] == 1,
-                        Some(Col::F64(v)) => !v[i].is_nan(),
-                        Some(Col::Str(v)) => v[i].is_some(),
+                        Some(Col::F64(v))  => !v[i].is_nan(),
+                        Some(Col::Str(sc)) => sc.categories[sc.codes[i] as usize].is_some(),
                         None => false,
                     }
                 } else {
@@ -182,15 +237,87 @@ impl ColumnStore {
         start: usize,
         end: usize,
     ) -> Result<PipelineResult, DataError> {
-        let resolved = filter.map(|(conds, logic)| (resolve(&self.cols, conds), logic));
-        let mut groups: IndexMap<String, Vec<usize>> = IndexMap::new();
 
-        for i in start..end {
-            if let Some((ref res, logic)) = resolved {
-                if !eval_all(res, i, logic) {
-                    continue;
+        // ── fast path: single Str key → integer bucketing, lean accumulators ─
+        if op.field.len() == 1 {
+            if let Some(Col::Str(key_col)) = self.cols.get(&op.field[0]) {
+                let n_cats = key_col.categories.len();
+                let codes  = key_col.codes.as_slice();
+                let mut counts = vec![0usize; n_cats];
+
+                let agg_cols: Vec<&[f64]> = op.aggregate.iter()
+                    .map(|a| match self.cols.get(&a.field) {
+                        Some(Col::F64(v)) => v.as_slice(),
+                        _ => &[],
+                    })
+                    .collect();
+
+                // Only allocate what each reducer actually needs
+                let mut agg_bufs: Vec<AggBuf> = op.aggregate.iter()
+                    .map(|a| AggBuf::new(&a.reducer, n_cats))
+                    .collect();
+
+                // Two separate loops — no closure/match overhead in the no-filter path
+                if let Some((conds, logic)) = filter {
+                    let res = resolve(&self.cols, conds);
+                    for i in start..end {
+                        if !eval_all(&res, i, logic) { continue; }
+                        let g = codes[i] as usize;
+                        counts[g] += 1;
+                        for (buf, col) in agg_bufs.iter_mut().zip(agg_cols.iter()) {
+                            if col.is_empty() { continue; }
+                            let v = col[i];
+                            if !v.is_nan() { buf.update(g, v); }
+                        }
+                    }
+                } else {
+                    for i in start..end {
+                        let g = codes[i] as usize;
+                        counts[g] += 1;
+                        for (buf, col) in agg_bufs.iter_mut().zip(agg_cols.iter()) {
+                            if col.is_empty() { continue; }
+                            let v = col[i];
+                            if !v.is_nan() { buf.update(g, v); }
+                        }
+                    }
                 }
+
+                // Output: N_unique iterations only
+                let mut out: IndexMap<String, Value> = IndexMap::new();
+                for (g, cat) in key_col.categories.iter().enumerate() {
+                    if counts[g] == 0 { continue; }
+                    let key = cat.clone().unwrap_or_else(|| "null".into());
+                    let mut agg: serde_json::Map<String, Value> = serde_json::Map::new();
+                    agg.insert("_count".into(), Value::Number(counts[g].into()));
+                    for (buf, reduce_op) in agg_bufs.iter().zip(op.aggregate.iter()) {
+                        let alias = reduce_op.alias.clone().unwrap_or_else(|| {
+                            format!(
+                                "{}_{}",
+                                format!("{:?}", reduce_op.reducer).to_lowercase(),
+                                reduce_op.field
+                            )
+                        });
+                        let val = buf.result(g, &reduce_op.reducer);
+                        let num = serde_json::Number::from_f64(val).unwrap_or_else(|| 0.into());
+                        agg.insert(alias, Value::Number(num));
+                    }
+                    out.insert(key, Value::Object(agg));
+                }
+                return Ok(PipelineResult::Object(out));
             }
+        }
+
+        // ── general fallback (multi-field or non-Str key) ─────────────────────
+        let resolved = filter.map(|(conds, logic)| (resolve(&self.cols, conds), logic));
+        let passes = |i: usize| -> bool {
+            match &resolved {
+                None => true,
+                Some((res, logic)) => eval_all(res, i, logic),
+            }
+        };
+        let mut groups: IndexMap<String, Vec<usize>> = IndexMap::new();
+        for i in start..end {
+            if !passes(i) { continue; }
             let key = op
                 .field
                 .iter()
@@ -218,7 +345,6 @@ impl ColumnStore {
             }
             out.insert(key, Value::Object(agg));
         }
-
         Ok(PipelineResult::Object(out))
     }
 
@@ -231,20 +357,14 @@ impl ColumnStore {
             Reducer::First => {
                 return Ok(indices
                     .iter()
-                    .find_map(|&i| {
-                        let v = col[i];
-                        if v.is_nan() { None } else { Some(v) }
-                    })
+                    .find_map(|&i| { let v = col[i]; if v.is_nan() { None } else { Some(v) } })
                     .unwrap_or(0.0));
             }
             Reducer::Last => {
                 return Ok(indices
                     .iter()
                     .rev()
-                    .find_map(|&i| {
-                        let v = col[i];
-                        if v.is_nan() { None } else { Some(v) }
-                    })
+                    .find_map(|&i| { let v = col[i]; if v.is_nan() { None } else { Some(v) } })
                     .unwrap_or(0.0));
             }
             _ => {}
@@ -289,8 +409,8 @@ impl ColumnStore {
 // ── Column construction ───────────────────────────────────────────────────────
 
 fn build_col(rows: &[Row], field: &str) -> Col {
-    let mut seen_num = false;
-    let mut seen_bool = false;
+    let mut seen_num   = false;
+    let mut seen_bool  = false;
     let mut seen_other = false;
 
     for row in rows {
@@ -309,14 +429,22 @@ fn build_col(rows: &[Row], field: &str) -> Col {
     }
 
     if seen_other {
-        Col::Str(rows.iter().map(|r| match r.get(field) {
-            Some(Value::String(s)) => Some(s.clone()),
-            Some(v) if !v.is_null() => Some(v.to_string()),
-            _ => None,
-        }).collect())
+        // Phase 1: collect unique values (insertion order = code assignment)
+        let mut cat_map: IndexMap<Option<String>, u16> = IndexMap::new();
+        for row in rows {
+            let s = row_str_val(row, field);
+            let next = cat_map.len() as u16;
+            cat_map.entry(s).or_insert(next);
+        }
+        // Phase 2: encode each row as a u16 code
+        let codes: Vec<u16> = rows.iter()
+            .map(|row| *cat_map.get(&row_str_val(row, field)).unwrap())
+            .collect();
+        let categories: Vec<Option<String>> = cat_map.into_keys().collect();
+        Col::Str(StrColumn { codes, categories })
     } else if seen_bool {
         Col::Bool(rows.iter().map(|r| match r.get(field) {
-            Some(Value::Bool(true)) => 1u8,
+            Some(Value::Bool(true))  => 1u8,
             Some(Value::Bool(false)) => 0u8,
             _ => 255u8,
         }).collect())
@@ -328,12 +456,22 @@ fn build_col(rows: &[Row], field: &str) -> Col {
     }
 }
 
+#[inline]
+fn row_str_val(row: &Row, field: &str) -> Option<String> {
+    match row.get(field) {
+        Some(Value::String(s)) => Some(s.clone()),
+        Some(v) if !v.is_null() => Some(v.to_string()),
+        _ => None,
+    }
+}
+
 // ── Condition resolution (eliminate hash lookups from the scan loop) ──────────
 
 enum ResolvedCond<'a> {
-    F64 { col: &'a [f64], op: &'a Operator, threshold: f64, raw: &'a Value },
-    Bool { col: &'a [u8], op: &'a Operator, threshold: u8 },
-    Str { col: &'a [Option<String>], op: &'a Operator, raw: &'a Value },
+    F64     { col: &'a [f64],  op: &'a Operator, threshold: f64, raw: &'a Value },
+    Bool    { col: &'a [u8],   op: &'a Operator, threshold: u8 },
+    StrCode { codes: &'a [u16], eq: bool, target: Option<u16> }, // Eq / Ne: integer compare
+    Str     { codes: &'a [u16], cats: &'a [Option<String>], op: &'a Operator, raw: &'a Value },
     Missing,
 }
 
@@ -351,15 +489,25 @@ fn resolve<'a>(cols: &'a IndexMap<String, Col>, conds: &'a [Condition]) -> Vec<R
                 col: v.as_slice(),
                 op: &c.operator,
                 threshold: match &c.value {
-                    Value::Bool(true) => 1,
+                    Value::Bool(true)  => 1,
                     Value::Bool(false) => 0,
                     _ => 255,
                 },
             },
-            Some(Col::Str(v)) => ResolvedCond::Str {
-                col: v.as_slice(),
-                op: &c.operator,
-                raw: &c.value,
+            Some(Col::Str(sc)) => match &c.operator {
+                Operator::Eq | Operator::Ne => {
+                    let target = sc.categories.iter()
+                        .position(|cat| cat.as_deref() == c.value.as_str())
+                        .map(|p| p as u16);
+                    let eq = matches!(c.operator, Operator::Eq);
+                    ResolvedCond::StrCode { codes: &sc.codes, eq, target }
+                }
+                _ => ResolvedCond::Str {
+                    codes: &sc.codes,
+                    cats:  &sc.categories,
+                    op:    &c.operator,
+                    raw:   &c.value,
+                },
             },
             None => ResolvedCond::Missing,
         })
@@ -370,7 +518,7 @@ fn resolve<'a>(cols: &'a IndexMap<String, Col>, conds: &'a [Condition]) -> Vec<R
 fn eval_all(resolved: &[ResolvedCond], i: usize, logic: &ConditionLogic) -> bool {
     match logic {
         ConditionLogic::And => resolved.iter().all(|rc| eval_one(rc, i)),
-        ConditionLogic::Or => resolved.iter().any(|rc| eval_one(rc, i)),
+        ConditionLogic::Or  => resolved.iter().any(|rc| eval_one(rc, i)),
     }
 }
 
@@ -380,14 +528,14 @@ fn eval_one(rc: &ResolvedCond, i: usize) -> bool {
         ResolvedCond::F64 { col, op, threshold, raw } => {
             let v = col[i];
             match op {
-                Operator::IsNull => v.is_nan(),
+                Operator::IsNull    => v.is_nan(),
                 Operator::IsNotNull => !v.is_nan(),
                 _ if v.is_nan() => false,
-                Operator::Eq => v == *threshold,
-                Operator::Ne => v != *threshold,
-                Operator::Gt => v > *threshold,
+                Operator::Eq  => v == *threshold,
+                Operator::Ne  => v != *threshold,
+                Operator::Gt  => v >  *threshold,
                 Operator::Gte => v >= *threshold,
-                Operator::Lt => v < *threshold,
+                Operator::Lt  => v <  *threshold,
                 Operator::Lte => v <= *threshold,
                 Operator::In => raw
                     .as_array()
@@ -401,7 +549,7 @@ fn eval_one(rc: &ResolvedCond, i: usize) -> bool {
         ResolvedCond::Bool { col, op, threshold } => {
             let v = col[i];
             match op {
-                Operator::IsNull => v == 255,
+                Operator::IsNull    => v == 255,
                 Operator::IsNotNull => v != 255,
                 _ if v == 255 => false,
                 Operator::Eq => v == *threshold,
@@ -409,23 +557,32 @@ fn eval_one(rc: &ResolvedCond, i: usize) -> bool {
                 _ => false,
             }
         }
-        ResolvedCond::Str { col, op, raw } => match &col[i] {
-            None => matches!(op, Operator::IsNull),
-            Some(s) => eval_str(s.as_str(), op, raw),
-        },
+        ResolvedCond::StrCode { codes, eq, target } => {
+            let v = codes[i];
+            match target {
+                Some(tc) => if *eq { v == *tc } else { v != *tc },
+                None => !*eq,
+            }
+        }
+        ResolvedCond::Str { codes, cats, op, raw } => {
+            match &cats[codes[i] as usize] {
+                None    => matches!(op, Operator::IsNull),
+                Some(s) => eval_str(s.as_str(), op, raw),
+            }
+        }
         ResolvedCond::Missing => false,
     }
 }
 
 fn eval_str(s: &str, op: &Operator, raw: &Value) -> bool {
     match op {
-        Operator::IsNull => false,
-        Operator::IsNotNull => true,
-        Operator::Eq => raw.as_str().map_or(false, |r| s == r),
-        Operator::Ne => raw.as_str().map_or(true, |r| s != r),
-        Operator::Contains => raw.as_str().map_or(false, |r| s.contains(r)),
-        Operator::StartsWith => raw.as_str().map_or(false, |r| s.starts_with(r)),
-        Operator::EndsWith => raw.as_str().map_or(false, |r| s.ends_with(r)),
+        Operator::IsNull      => false,
+        Operator::IsNotNull   => true,
+        Operator::Eq          => raw.as_str().map_or(false, |r| s == r),
+        Operator::Ne          => raw.as_str().map_or(true,  |r| s != r),
+        Operator::Contains    => raw.as_str().map_or(false, |r| s.contains(r)),
+        Operator::StartsWith  => raw.as_str().map_or(false, |r| s.starts_with(r)),
+        Operator::EndsWith    => raw.as_str().map_or(false, |r| s.ends_with(r)),
         Operator::In => raw
             .as_array()
             .map_or(false, |arr| arr.iter().any(|x| x.as_str().map_or(false, |r| r == s))),
@@ -480,20 +637,18 @@ fn col_val_str(cols: &IndexMap<String, Col>, field: &str, i: usize) -> String {
     match cols.get(field) {
         Some(Col::F64(v)) => {
             let x = v[i];
-            if x.is_nan() {
-                "null".into()
-            } else if x.fract() == 0.0 {
-                format!("{}", x as i64)
-            } else {
-                x.to_string()
-            }
+            if x.is_nan() { "null".into() }
+            else if x.fract() == 0.0 { format!("{}", x as i64) }
+            else { x.to_string() }
         }
         Some(Col::Bool(v)) => match v[i] {
             1 => "true".into(),
             0 => "false".into(),
             _ => "null".into(),
         },
-        Some(Col::Str(v)) => v[i].clone().unwrap_or_else(|| "null".into()),
+        Some(Col::Str(sc)) => sc.categories[sc.codes[i] as usize]
+            .clone()
+            .unwrap_or_else(|| "null".into()),
         None => "null".into(),
     }
 }
