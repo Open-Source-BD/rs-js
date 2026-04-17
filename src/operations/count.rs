@@ -4,10 +4,13 @@ use serde_json::Value;
 pub fn apply_count(data: &[Row], op: CountOp) -> usize {
     match op.field {
         None => data.len(),
-        Some(field) => data.iter().filter(|row| {
-            row.get(&field)
-                .map_or(false, |v| !v.is_null() && *v != Value::Bool(false))
-        }).count(),
+        Some(field) => data
+            .iter()
+            .filter(|row| {
+                row.get(&field)
+                    .map_or(false, |v| !v.is_null() && *v != Value::Bool(false))
+            })
+            .count(),
     }
 }
 
@@ -18,9 +21,18 @@ mod tests {
 
     fn make_data() -> Vec<Row> {
         vec![
-            [("active", json!(true))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
-            [("active", json!(false))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
-            [("active", json!(true))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
+            [("active", json!(true))]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            [("active", json!(false))]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            [("active", json!(true))]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
         ]
     }
 
@@ -32,7 +44,9 @@ mod tests {
 
     #[test]
     fn count_truthy_field() {
-        let op = CountOp { field: Some("active".into()) };
+        let op = CountOp {
+            field: Some("active".into()),
+        };
         assert_eq!(apply_count(&make_data(), op), 2);
     }
 }

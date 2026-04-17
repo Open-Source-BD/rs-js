@@ -6,7 +6,7 @@ use thiserror::Error;
 pub type Row = IndexMap<String, Value>;
 pub type Dataset = Vec<Row>;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 pub enum Operation {
     Filter(FilterOp),
@@ -19,7 +19,7 @@ pub enum Operation {
 
 // --- Filter / Find conditions ---
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FilterOp {
     pub conditions: Vec<Condition>,
@@ -27,7 +27,7 @@ pub struct FilterOp {
     pub logic: ConditionLogic,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FindOp {
     pub conditions: Vec<Condition>,
@@ -39,7 +39,7 @@ fn default_logic() -> ConditionLogic {
     ConditionLogic::And
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum ConditionLogic {
     #[default]
@@ -47,7 +47,7 @@ pub enum ConditionLogic {
     Or,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Condition {
     pub field: String,
@@ -55,7 +55,7 @@ pub struct Condition {
     pub value: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Operator {
     Eq,
@@ -75,29 +75,39 @@ pub enum Operator {
 
 // --- Map ---
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MapOp {
     pub transforms: Vec<FieldTransform>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldTransform {
     pub field: String,
     pub expr: MapExpr,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum MapExpr {
-    Literal { value: Value },
-    Field { name: String },
-    Template { template: String },
-    Arithmetic { op: ArithOp, left: Box<MapExpr>, right: Box<MapExpr> },
+    Literal {
+        value: Value,
+    },
+    Field {
+        name: String,
+    },
+    Template {
+        template: String,
+    },
+    Arithmetic {
+        op: ArithOp,
+        left: Box<MapExpr>,
+        right: Box<MapExpr>,
+    },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum ArithOp {
     #[serde(rename = "+")]
     Add,
@@ -133,7 +143,7 @@ pub enum Reducer {
 
 // --- GroupBy ---
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupByOp {
     #[serde(deserialize_with = "string_or_vec")]
@@ -173,7 +183,7 @@ where
 
 // --- Count ---
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CountOp {
     #[serde(default)]
@@ -208,9 +218,17 @@ pub enum DataError {
     #[error("deserialization failed: {0}")]
     Deserialize(String),
     #[error("operation '{op}' on field '{field}': {reason}")]
-    Operation { op: String, field: String, reason: String },
+    Operation {
+        op: String,
+        field: String,
+        reason: String,
+    },
     #[error("type mismatch on field '{field}': expected {expected}, got {got}")]
-    TypeMismatch { field: String, expected: String, got: String },
+    TypeMismatch {
+        field: String,
+        expected: String,
+        got: String,
+    },
     #[error("invalid expression: {0}")]
     InvalidExpr(String),
     #[error("empty pipeline")]

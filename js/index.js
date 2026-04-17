@@ -11,26 +11,195 @@ function getWasm() {
 }
 
 /**
- * Process a dataset through a pipeline of operations.
- *
- * @param {Record<string, unknown>[]} data
- * @param {import('./index.d.ts').Operation[]} operations
- * @param {import('./index.d.ts').PipelineOptions} [options]
- * @returns {Promise<import('./index.d.ts').PipelineResult>}
- */
-export async function process(data, operations, options) {
-    const wasm = await getWasm();
-    return wasm.processRaw(data, operations, options ?? undefined);
-}
-
-/**
  * Create a stateful DataEngine. Deserializes data once into WASM memory.
  * Call .query() many times without re-serializing the dataset.
  *
  * @param {Record<string, unknown>[]} data
- * @returns {Promise<import('./index.d.ts').DataEngine>}
+ * @param {import('./index.d.ts').DataEngineOptions} [options]
+ * @returns {Promise<DataEngine>}
  */
-export async function createEngine(data) {
+export async function createEngine(data, options) {
     const wasm = await getWasm();
-    return new wasm.DataEngine(data);
+    return new DataEngine(data, wasm, options);
+}
+
+function applyWindow(data, options) {
+    if (!options) return data;
+    const offset = Number.isInteger(options.offset) ? options.offset : 0;
+    const start = Math.max(0, offset);
+    const end = Number.isInteger(options.limit) ? start + Math.max(0, options.limit) : data.length;
+    return data.slice(start, Math.min(end, data.length));
+}
+
+function evalCondition(row, cond) {
+    const value = row[cond.field];
+    switch (cond.operator) {
+        case 'eq': return value === cond.value;
+        case 'ne': return value !== cond.value;
+        case 'gt': return value > cond.value;
+        case 'gte': return value >= cond.value;
+        case 'lt': return value < cond.value;
+        case 'lte': return value <= cond.value;
+        default: return false;
+    }
+}
+
+function evalConditions(row, conditions, logic = 'and') {
+    if (logic === 'or') return conditions.some((c) => evalCondition(row, c));
+    return conditions.every((c) => evalCondition(row, c));
+}
+
+function evalMapExpr(row, expr) {
+    switch (expr.type) {
+        case 'literal': return expr.value;
+        case 'field': return row[expr.name] ?? null;
+        case 'template': {
+            let out = expr.template;
+            for (const [k, v] of Object.entries(row)) {
+                out = out.replaceAll(`{${k}}`, String(v));
+            }
+            return out;
+        }
+        case 'arithmetic': {
+            const l = Number(evalMapExpr(row, expr.left));
+            const r = Number(evalMapExpr(row, expr.right));
+            switch (expr.op) {
+                case '+': return l + r;
+                case '-': return l - r;
+                case '*': return l * r;
+                case '/': return r === 0 ? null : l / r;
+                default: return null;
+            }
+        }
+        default:
+            return null;
+    }
+}
+
+export class DataEngine {
+    constructor(data, wasm, options = {}) {
+        this._data = data;
+        this._engine = new wasm.DataEngine(data);
+        this._wasm = wasm;
+        this._prepared = new Map();
+        this._smallRowThreshold = Number.isInteger(options.smallRowThreshold)
+            ? options.smallRowThreshold
+            : 2000;
+    }
+
+    _getPrepared(operations) {
+        const key = JSON.stringify(operations);
+        let pq = this._prepared.get(key);
+        if (!pq) {
+            pq = new this._wasm.PreparedQuery(operations);
+            this._prepared.set(key, pq);
+        }
+        return pq;
+    }
+
+    _queryFilter(op, options) {
+        const windowed = applyWindow(this._data, options);
+        if (windowed.length <= this._smallRowThreshold) {
+            const rows = windowed.filter((r) => evalConditions(r, op.conditions, op.logic));
+            return { type: 'array', value: rows };
+        }
+        const idx = this._engine.filterIndices([{ op: 'filter', conditions: op.conditions, logic: op.logic ?? 'and' }], options);
+        const m = idx.length;
+        const rows = new Array(m);
+        for (let i = 0; i < m; i++) rows[i] = this._data[idx[i]];
+        return { type: 'array', value: rows };
+    }
+
+    _queryMap(op, options) {
+        const windowed = applyWindow(this._data, options);
+        if (windowed.length <= this._smallRowThreshold) {
+            const rows = windowed.map((row) => {
+                const out = { ...row };
+                for (const t of op.transforms) out[t.field] = evalMapExpr(out, t.expr);
+                return out;
+            });
+            return { type: 'array', value: rows };
+        }
+
+        const computed = this._engine.mapField([{ op: 'map', transforms: op.transforms }], options);
+        const n = windowed.length;
+        const rows = new Array(n);
+        const entries = Object.entries(computed);
+        const n_fields = entries.length;
+
+        for (let i = 0; i < n; i++) {
+            const row = { ...windowed[i] };
+            for (let j = 0; j < n_fields; j++) {
+                row[entries[j][0]] = entries[j][1][i];
+            }
+            rows[i] = row;
+        }
+        return { type: 'array', value: rows };
+    }
+
+    _queryGroupByNoAgg(op, options) {
+        const fields = Array.isArray(op.field) ? op.field : [op.field];
+        if (fields.length !== 1) return this._engine.query([{ op: 'groupBy', field: op.field }], options);
+
+        const field = fields[0];
+        const windowed = applyWindow(this._data, options);
+        if (windowed.length <= this._smallRowThreshold) {
+            const groups = {};
+            for (const row of windowed) {
+                const key = row[field] == null ? 'null' : String(row[field]);
+                (groups[key] ??= []).push(row);
+            }
+
+            const out = [];
+            for (const [key, rows] of Object.entries(groups)) {
+                const sample = rows[0] || {};
+                out.push({ _group: key, _count: rows.length, [field]: sample[field], rows });
+            }
+            return { type: 'array', value: out };
+        }
+
+        const idx = this._engine.groupByIndices(field);
+        const out = [];
+        for (const [key, ids] of Object.entries(idx)) {
+            const rows = new Array(ids.length);
+            for (let i = 0; i < ids.length; i++) rows[i] = this._data[ids[i]];
+            const sample = rows[0] || {};
+            out.push({ _group: key, _count: rows.length, [field]: sample[field], rows });
+        }
+        return { type: 'array', value: out };
+    }
+
+    query(operations, options) {
+        if (operations.length === 1 && operations[0].op === 'filter') {
+            return this._queryFilter(operations[0], options);
+        }
+        if (operations.length === 1 && operations[0].op === 'map') {
+            return this._queryMap(operations[0], options);
+        }
+        if (operations.length === 1 && operations[0].op === 'groupBy' && (!operations[0].aggregate || operations[0].aggregate.length === 0)) {
+            return this._queryGroupByNoAgg(operations[0], options);
+        }
+
+        const prepared = this._getPrepared(operations);
+        return this._engine.queryPrepared(prepared, options);
+    }
+
+    free() {
+        for (const pq of this._prepared.values()) pq.free();
+        this._prepared.clear();
+        this._engine.free();
+    }
+
+    len() {
+        return this._engine.len();
+    }
+
+    is_empty() {
+        return this._engine.is_empty();
+    }
+
+    filterIndices(ops, opts) { return this._engine.filterIndices(ops, opts); }
+    filterView(ops, opts) { return this._engine.filterView(ops, opts); }
+    mapField(ops, opts) { return this._engine.mapField(ops, opts); }
+    groupByIndices(field) { return this._engine.groupByIndices(field); }
 }
