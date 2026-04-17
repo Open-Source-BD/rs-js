@@ -152,13 +152,11 @@ impl DataEngine {
             .map(|l| (start + l).min(self.col_store.len))
             .unwrap_or(self.col_store.len);
 
-        let indices: Vec<u32> = match ops.as_slice() {
-            [Operation::Filter(f)] => {
-                self.col_store
-                    .filter_indices(&f.conditions, &f.logic, start, end)
-            }
+        let mut indices: Vec<u32> = match ops.as_slice() {
+            [Operation::Filter(f)] => self.col_store.filter_indices(&f.conditions, &f.logic, start, end),
             _ => (start as u32..end as u32).collect(),
         };
+        indices.sort_unstable();
         let n = indices.len();
 
         // Stable column order
@@ -279,6 +277,56 @@ impl DataEngine {
 
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
+    }
+
+    #[wasm_bindgen(js_name = "filterViewRef")]
+    pub fn filter_view_ref(
+        &self,
+        operations: JsValue,
+        options: Option<JsValue>,
+        callback: &js_sys::Function,
+    ) -> Result<JsValue, JsValue> {
+        let ops = deserialize_ops(operations)?;
+        let opts = deserialize_opts(options)?;
+        let start = opts.offset.unwrap_or(0).min(self.col_store.len);
+        let end = opts
+            .limit
+            .map(|l| (start + l).min(self.col_store.len))
+            .unwrap_or(self.col_store.len);
+
+        let indices: Vec<u32> = match ops.as_slice() {
+            [Operation::Filter(f)] => self.col_store.filter_indices(&f.conditions, &f.logic, start, end),
+            _ => (start as u32..end as u32).collect(),
+        };
+
+        if indices.is_empty() {
+            callback.call1(&JsValue::NULL, &Object::new().into())?;
+            return Ok(JsValue::UNDEFINED);
+        }
+
+        let out = Object::new();
+        let memory = wasm_bindgen::memory().dyn_into::<js_sys::WebAssembly::Memory>()?.buffer();
+
+        for (name, col) in &self.col_store.cols {
+            let val = match col {
+                Col::F64(v) => {
+                    let offset = v.as_ptr() as u32 / 8;
+                    Float64Array::new(&memory).subarray(offset + indices[0], offset + indices[0] + indices.len() as u32).into()
+                }
+                Col::Bool(v) => {
+                    let offset = v.as_ptr() as u32;
+                    Uint8Array::new(&memory).subarray(offset + indices[0], offset + indices[0] + indices.len() as u32).into()
+                }
+                Col::Str(sc) => {
+                    let offset = sc.codes.as_ptr() as u32 / 2;
+                    Uint16Array::new(&memory).subarray(offset + indices[0], offset + indices[0] + indices.len() as u32).into()
+                }
+            };
+            js_sys::Reflect::set(&out, &JsValue::from(name), &val)?;
+        }
+        
+        callback.call1(&JsValue::NULL, &out.into())?;
+        Ok(JsValue::UNDEFINED)
     }
 }
 

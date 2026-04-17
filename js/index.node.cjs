@@ -206,6 +206,7 @@ class DataEngine {
     // Exposed for advanced users
     filterIndices(ops, opts) { return this._engine.filterIndices(ops, opts); }
     filterView(ops, opts) { return this._engine.filterView(ops, opts); }
+    filterViewRef(ops, callback, opts) { return this._engine.filterViewRef(ops, opts, callback); }
     mapField(ops, opts) { return this._engine.mapField(ops, opts); }
     groupByIndices(field) { return this._engine.groupByIndices(field); }
 }

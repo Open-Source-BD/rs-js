@@ -218,6 +218,11 @@ function run() {
             () => engine.filterView(filterOps),
         ]));
 
+        rows.push(bench('filterViewRef (zero-copy)', [
+            () => jsFilter(data),
+            () => engine.filterViewRef(filterOps, (ref) => ref),
+        ]));
+
         rows.push(bench('mapField    (bonus col only)', [
             () => jsMap(data),
             () => engine.mapField(mapOps),
