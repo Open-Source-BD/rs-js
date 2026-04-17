@@ -59,34 +59,53 @@ mod tests {
     use serde_json::json;
 
     fn row(pairs: &[(&str, serde_json::Value)]) -> Row {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     #[test]
     fn test_eq() {
         let r = row(&[("age", json!(25))]);
-        let cond = Condition { field: "age".into(), operator: Operator::Eq, value: json!(25) };
+        let cond = Condition {
+            field: "age".into(),
+            operator: Operator::Eq,
+            value: json!(25),
+        };
         assert!(evaluate_conditions(&r, &[cond], &ConditionLogic::And));
     }
 
     #[test]
     fn test_gte() {
         let r = row(&[("age", json!(18))]);
-        let cond = Condition { field: "age".into(), operator: Operator::Gte, value: json!(18) };
+        let cond = Condition {
+            field: "age".into(),
+            operator: Operator::Gte,
+            value: json!(18),
+        };
         assert!(evaluate_conditions(&r, &[cond], &ConditionLogic::And));
     }
 
     #[test]
     fn test_contains() {
         let r = row(&[("name", json!("Alice"))]);
-        let cond = Condition { field: "name".into(), operator: Operator::Contains, value: json!("lic") };
+        let cond = Condition {
+            field: "name".into(),
+            operator: Operator::Contains,
+            value: json!("lic"),
+        };
         assert!(evaluate_conditions(&r, &[cond], &ConditionLogic::And));
     }
 
     #[test]
     fn test_is_null() {
         let r = row(&[("x", json!(null))]);
-        let cond = Condition { field: "x".into(), operator: Operator::IsNull, value: json!(null) };
+        let cond = Condition {
+            field: "x".into(),
+            operator: Operator::IsNull,
+            value: json!(null),
+        };
         assert!(evaluate_conditions(&r, &[cond], &ConditionLogic::And));
     }
 

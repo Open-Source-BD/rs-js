@@ -13,10 +13,13 @@ pub fn apply_group_by(data: &[Row], op: GroupByOp) -> Result<PipelineResult, Dat
             .field
             .iter()
             .map(|f| {
-                row.get(f).map_or_else(|| "null".to_string(), |v| match v {
-                    Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                })
+                row.get(f).map_or_else(
+                    || "null".to_string(),
+                    |v| match v {
+                        Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    },
+                )
             })
             .collect::<Vec<_>>()
             .join("||");
@@ -57,11 +60,15 @@ pub fn apply_group_by(data: &[Row], op: GroupByOp) -> Result<PipelineResult, Dat
         agg.insert("_count".into(), Value::Number(rows.len().into()));
         for reduce_op in &op.aggregate {
             let alias = reduce_op.alias.clone().unwrap_or_else(|| {
-                format!("{}_{}", format!("{:?}", reduce_op.reducer).to_lowercase(), reduce_op.field)
+                format!(
+                    "{}_{}",
+                    format!("{:?}", reduce_op.reducer).to_lowercase(),
+                    reduce_op.field
+                )
             });
             let val = apply_reduce(&rows, reduce_op.clone())?;
-            let num = serde_json::Number::from_f64(val)
-                .unwrap_or_else(|| serde_json::Number::from(0));
+            let num =
+                serde_json::Number::from_f64(val).unwrap_or_else(|| serde_json::Number::from(0));
             agg.insert(alias, Value::Number(num));
         }
         out.insert(key, Value::Object(agg));
@@ -76,15 +83,27 @@ mod tests {
 
     fn make_data() -> Vec<Row> {
         vec![
-            [("country", json!("US")), ("salary", json!(100.0))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
-            [("country", json!("UK")), ("salary", json!(80.0))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
-            [("country", json!("US")), ("salary", json!(120.0))].iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
+            [("country", json!("US")), ("salary", json!(100.0))]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            [("country", json!("UK")), ("salary", json!(80.0))]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            [("country", json!("US")), ("salary", json!(120.0))]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
         ]
     }
 
     #[test]
     fn group_no_agg() {
-        let op = GroupByOp { field: vec!["country".into()], aggregate: vec![] };
+        let op = GroupByOp {
+            field: vec!["country".into()],
+            aggregate: vec![],
+        };
         let result = apply_group_by(&make_data(), op).unwrap();
         if let PipelineResult::Array(rows) = result {
             assert_eq!(rows.len(), 2);
@@ -98,7 +117,11 @@ mod tests {
         use crate::types::{ReduceOp, Reducer};
         let op = GroupByOp {
             field: vec!["country".into()],
-            aggregate: vec![ReduceOp { field: "salary".into(), reducer: Reducer::Sum, alias: Some("total".into()) }],
+            aggregate: vec![ReduceOp {
+                field: "salary".into(),
+                reducer: Reducer::Sum,
+                alias: Some("total".into()),
+            }],
         };
         let result = apply_group_by(&make_data(), op).unwrap();
         if let PipelineResult::Object(map) = result {

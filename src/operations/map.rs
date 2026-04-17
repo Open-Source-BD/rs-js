@@ -58,20 +58,28 @@ fn eval_expr(row: &Row, expr: &MapExpr) -> Result<Value, DataError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{FieldTransform, MapExpr, ArithOp};
+    use crate::types::{ArithOp, FieldTransform, MapExpr};
     use serde_json::json;
 
     fn make_row(pairs: &[(&str, serde_json::Value)]) -> Row {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     #[test]
     fn extract_field() {
-        let data = vec![make_row(&[("first", json!("Alice")), ("last", json!("Smith"))])];
+        let data = vec![make_row(&[
+            ("first", json!("Alice")),
+            ("last", json!("Smith")),
+        ])];
         let op = MapOp {
             transforms: vec![FieldTransform {
                 field: "name".into(),
-                expr: MapExpr::Template { template: "{first} {last}".into() },
+                expr: MapExpr::Template {
+                    template: "{first} {last}".into(),
+                },
             }],
         };
         let result = apply_map(&data, op).unwrap();
@@ -86,12 +94,17 @@ mod tests {
                 field: "double_salary".into(),
                 expr: MapExpr::Arithmetic {
                     op: ArithOp::Mul,
-                    left: Box::new(MapExpr::Field { name: "salary".into() }),
+                    left: Box::new(MapExpr::Field {
+                        name: "salary".into(),
+                    }),
                     right: Box::new(MapExpr::Literal { value: json!(2.0) }),
                 },
             }],
         };
         let result = apply_map(&data, op).unwrap();
-        assert_eq!(result[0].get("double_salary").and_then(|v| v.as_f64()), Some(100000.0));
+        assert_eq!(
+            result[0].get("double_salary").and_then(|v| v.as_f64()),
+            Some(100000.0)
+        );
     }
 }

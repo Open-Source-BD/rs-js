@@ -53,21 +53,43 @@ mod tests {
 
     #[test]
     fn sum() {
-        let op = ReduceOp { field: "amount".into(), reducer: Reducer::Sum, alias: None };
-        assert_eq!(apply_reduce(&data_with_amounts(&[10.0, 20.0, 30.0]), op).unwrap(), 60.0);
+        let op = ReduceOp {
+            field: "amount".into(),
+            reducer: Reducer::Sum,
+            alias: None,
+        };
+        assert_eq!(
+            apply_reduce(&data_with_amounts(&[10.0, 20.0, 30.0]), op).unwrap(),
+            60.0
+        );
     }
 
     #[test]
     fn avg() {
-        let op = ReduceOp { field: "amount".into(), reducer: Reducer::Avg, alias: None };
-        assert_eq!(apply_reduce(&data_with_amounts(&[10.0, 20.0, 30.0]), op).unwrap(), 20.0);
+        let op = ReduceOp {
+            field: "amount".into(),
+            reducer: Reducer::Avg,
+            alias: None,
+        };
+        assert_eq!(
+            apply_reduce(&data_with_amounts(&[10.0, 20.0, 30.0]), op).unwrap(),
+            20.0
+        );
     }
 
     #[test]
     fn min_max() {
         let data = data_with_amounts(&[5.0, 1.0, 9.0]);
-        let min_op = ReduceOp { field: "amount".into(), reducer: Reducer::Min, alias: None };
-        let max_op = ReduceOp { field: "amount".into(), reducer: Reducer::Max, alias: None };
+        let min_op = ReduceOp {
+            field: "amount".into(),
+            reducer: Reducer::Min,
+            alias: None,
+        };
+        let max_op = ReduceOp {
+            field: "amount".into(),
+            reducer: Reducer::Max,
+            alias: None,
+        };
         assert_eq!(apply_reduce(&data, min_op).unwrap(), 1.0);
         assert_eq!(apply_reduce(&data, max_op).unwrap(), 9.0);
     }
