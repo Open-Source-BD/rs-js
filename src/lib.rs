@@ -1,9 +1,12 @@
+mod column_store;
 mod engine;
 mod eval;
 mod operations;
 mod types;
 
+use column_store::{try_columnar, ColumnStore};
 use engine::{execute_for_engine, Pipeline};
+use js_sys::Uint32Array;
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::Serializer;
 use types::{DataError, Dataset, Operation, PipelineOptions};
@@ -39,29 +42,69 @@ pub fn process_raw(
 #[wasm_bindgen]
 pub struct DataEngine {
     data: Dataset,
+    col_store: ColumnStore,
 }
 
 #[wasm_bindgen]
 impl DataEngine {
-    /// Load a JS array of objects into WASM memory. Pay serialization cost once.
+    /// Load data into WASM memory once. Builds row store + columnar store.
     #[wasm_bindgen(constructor)]
     pub fn new(data: JsValue) -> Result<DataEngine, JsValue> {
         let dataset = deserialize_dataset(data)?;
-        Ok(DataEngine { data: dataset })
+        let col_store = ColumnStore::from_rows(&dataset);
+        Ok(DataEngine { data: dataset, col_store })
     }
 
-    /// Run a pipeline against the in-memory dataset. No re-serialization of data.
+    /// Run a pipeline. Scalar-returning ops use the columnar fast path;
+    /// array-returning ops fall back to the row-based engine.
     pub fn query(&self, operations: JsValue, options: Option<JsValue>) -> Result<JsValue, JsValue> {
         let ops = deserialize_ops(operations)?;
         let opts = deserialize_opts(options)?;
 
-        let result = execute_for_engine(&self.data, opts, ops)
-            .map_err(JsValue::from)?;
+        let start = opts.offset.unwrap_or(0).min(self.col_store.len);
+        let end = opts
+            .limit
+            .map(|l| (start + l).min(self.col_store.len))
+            .unwrap_or(self.col_store.len);
 
+        if let Some(result) = try_columnar(&self.col_store, &self.data, &ops, start, end) {
+            return serialize_result(result.map_err(JsValue::from)?);
+        }
+
+        let result = execute_for_engine(&self.data, opts, ops).map_err(JsValue::from)?;
         serialize_result(result)
     }
 
-    /// Number of rows loaded.
+    /// Return matching row indices as a Uint32Array instead of full rows.
+    /// JS reconstructs: `Array.from(indices, i => data[i])`.
+    /// Eliminates WASM→JS row serialization — fastest path for filter.
+    #[wasm_bindgen(js_name = "filterIndices")]
+    pub fn filter_indices(
+        &self,
+        operations: JsValue,
+        options: Option<JsValue>,
+    ) -> Result<Uint32Array, JsValue> {
+        let ops = deserialize_ops(operations)?;
+        let opts = deserialize_opts(options)?;
+
+        let start = opts.offset.unwrap_or(0).min(self.col_store.len);
+        let end = opts
+            .limit
+            .map(|l| (start + l).min(self.col_store.len))
+            .unwrap_or(self.col_store.len);
+
+        let indices = match ops.as_slice() {
+            [Operation::Filter(f)] => {
+                self.col_store.filter_indices(&f.conditions, &f.logic, start, end)
+            }
+            _ => (start as u32..end as u32).collect(),
+        };
+
+        let arr = Uint32Array::new_with_length(indices.len() as u32);
+        arr.copy_from(&indices);
+        Ok(arr)
+    }
+
     pub fn len(&self) -> usize {
         self.data.len()
     }

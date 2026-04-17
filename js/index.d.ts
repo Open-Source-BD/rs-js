@@ -52,6 +52,8 @@ export declare function process(
 export declare class DataEngine {
     constructor(data: Record<string, unknown>[]);
     query(operations: Operation[], options?: PipelineOptions): PipelineResult;
+    /** Returns matching row indices as Uint32Array. Reconstruct: Array.from(idx, i => data[i]) */
+    filterIndices(operations: Operation[], options?: PipelineOptions): Uint32Array;
     len(): number;
     is_empty(): boolean;
     free(): void;
