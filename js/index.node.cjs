@@ -98,6 +98,21 @@ class DataEngine {
         return pq;
     }
 
+    _mapField(operations, options) {
+        if (typeof this._engine.mapField === 'function') {
+            return this._engine.mapField(operations, options);
+        }
+        if (typeof this._engine.mapFieldRef === 'function') {
+            let result;
+            this._engine.mapFieldRef(operations, (view) => {
+                result = view;
+                return view;
+            }, options);
+            return result;
+        }
+        throw new TypeError('WASM engine does not expose mapField or mapFieldRef');
+    }
+
     _queryFilter(op, options) {
         const windowed = applyWindow(this._data, options);
         if (windowed.length <= this._filterThreshold) {
@@ -122,7 +137,7 @@ class DataEngine {
             return { type: 'array', value: rows };
         }
 
-        const computed = this._engine.mapField([{ op: 'map', transforms: op.transforms }], options);
+        const computed = this._mapField([{ op: 'map', transforms: op.transforms }], options);
         const n = windowed.length;
         const rows = new Array(n);
         const entries = Object.entries(computed);
@@ -207,7 +222,7 @@ class DataEngine {
     filterIndices(ops, opts) { return this._engine.filterIndices(ops, opts); }
     filterView(ops, opts) { return this._engine.filterView(ops, opts); }
     filterViewRef(ops, callback, opts) { return this._engine.filterViewRef(ops, opts, callback); }
-    mapField(ops, opts) { return this._engine.mapField(ops, opts); }
+    mapField(ops, opts) { return this._mapField(ops, opts); }
     groupByIndices(field) { return this._engine.groupByIndices(field); }
 }
 
