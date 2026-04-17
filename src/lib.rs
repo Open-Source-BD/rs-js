@@ -18,25 +18,6 @@ pub fn _init() {
     console_error_panic_hook::set_once();
 }
 
-// ── process_raw: original one-shot API (serialize data every call) ─────────
-
-#[wasm_bindgen(js_name = "processRaw")]
-pub fn process_raw(
-    data: JsValue,
-    operations: JsValue,
-    options: Option<JsValue>,
-) -> Result<JsValue, JsValue> {
-    let dataset = deserialize_dataset(data)?;
-    let ops = deserialize_ops(operations)?;
-    let opts = deserialize_opts(options)?;
-
-    let result = Pipeline::new(dataset, opts)
-        .execute(ops)
-        .map_err(JsValue::from)?;
-
-    serialize_result(result)
-}
-
 // ── DataEngine: stateful API — deserialize once, query many times ──────────
 
 #[wasm_bindgen]
