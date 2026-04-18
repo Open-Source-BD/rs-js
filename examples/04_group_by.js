@@ -2,16 +2,16 @@
 // Requires: wasm-pack build --release --target nodejs --out-dir pkg-node
 // Run:      node examples/04_group_by.js
 
-const { DataEngine } = require('../js/index.node.cjs');
+const { RsJs } = require('../js/index.node.cjs');
 const { users, orders, events } = require('./data.js');
 
-const userEngine  = new DataEngine(users);
-const orderEngine = new DataEngine(orders);
-const eventEngine = new DataEngine(events);
+const usersRsJs  = new RsJs(users);
+const ordersRsJs = new RsJs(orders);
+const eventsRsJs = new RsJs(events);
 
 // --- 1. Group users by country (no aggregates) ---
 // Returns: { type: 'array', value: [{ _group, _count, country, rows }, ...] }
-const byCountry = userEngine.query([
+const byCountry = usersRsJs.query([
     { op: 'groupBy', field: 'country' }
 ]);
 console.log('Users by country:');
@@ -22,7 +22,7 @@ byCountry.value.forEach(g => {
 
 // --- 2. Group by department with salary aggregates ---
 // Returns: { type: 'object', value: { engineering: { _count, avg_salary, max_salary }, ... } }
-const deptStats = userEngine.query([
+const deptStats = usersRsJs.query([
     {
         op: 'groupBy',
         field: 'department',
@@ -43,7 +43,7 @@ Object.entries(deptStats.value).forEach(([dept, stats]) => {
 });
 
 // --- 3. Group orders by status with revenue sum ---
-const orderStats = orderEngine.query([
+const orderStats = ordersRsJs.query([
     {
         op: 'groupBy',
         field: 'status',
@@ -59,7 +59,7 @@ Object.entries(orderStats.value).forEach(([status, stats]) => {
 });
 
 // --- 4. Group events by type (count only) ---
-const eventGroups = eventEngine.query([
+const eventGroups = eventsRsJs.query([
     { op: 'groupBy', field: 'type' }
 ]);
 console.log('\nEvent type breakdown:');
@@ -68,7 +68,7 @@ eventGroups.value.forEach(g => {
 });
 
 // --- 5. Multi-field group: country + department ---
-const crossGroup = userEngine.query([
+const crossGroup = usersRsJs.query([
     {
         op: 'groupBy',
         field: ['country', 'department'],
@@ -82,7 +82,7 @@ Object.entries(crossGroup.value).forEach(([key, stats]) => {
 });
 
 // --- 6. Filter first, then group: active users by country ---
-const activeByCountry = userEngine.query([
+const activeByCountry = usersRsJs.query([
     { op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] },
     { op: 'groupBy', field: 'country' }
 ]);
@@ -93,11 +93,11 @@ activeByCountry.value.forEach(g => {
 
 // --- 7. Zero-copy group indices (groupByIndices) — raw index buckets, no row objects ---
 console.log('\nDepartment buckets (zero-copy indices):');
-const idx = userEngine.groupByIndices('department');
+const idx = usersRsJs.groupByIndices('department');
 Object.entries(idx).forEach(([dept, ids]) => {
     console.log(`  ${dept}: ${ids.length} users (indices: ${Array.from(ids).join(', ')})`);
 });
 
-userEngine.free();
-orderEngine.free();
-eventEngine.free();
+usersRsJs.free();
+ordersRsJs.free();
+eventsRsJs.free();

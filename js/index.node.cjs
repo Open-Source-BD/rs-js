@@ -65,7 +65,7 @@ function evalConditions(row, conditions, logic = 'and') {
     return conditions.every((c) => evalCondition(row, c));
 }
 
-class DataEngine {
+class RsJs {
     constructor(data, options = {}) {
         this._data = data;
         this._engine = new InternalDataEngine(data);
@@ -224,4 +224,4 @@ class DataEngine {
     groupByIndices(field) { return this._engine.groupByIndices(field); }
 }
 
-module.exports = { DataEngine };
+module.exports = { RsJs };

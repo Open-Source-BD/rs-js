@@ -2,21 +2,21 @@
 // Requires: wasm-pack build --release --target nodejs --out-dir pkg-node
 // Run:      node examples/02_map.js
 
-const { DataEngine } = require('../js/index.node.cjs');
+const { RsJs } = require('../js/index.node.cjs');
 const { users, orders } = require('./data.js');
 
-const userEngine  = new DataEngine(users);
-const orderEngine = new DataEngine(orders);
+const usersRsJs  = new RsJs(users);
+const ordersRsJs = new RsJs(orders);
 
 // --- 1. Extract a single field ---
-const names = userEngine.query([
+const names = usersRsJs.query([
     { op: 'map', transforms: [{ field: 'name', expr: { type: 'field', name: 'name' } }] }
 ]);
 console.log('All names:');
 console.log(' ', names.value.map(u => u.name).join(', '));
 
 // --- 2. Build a display name using a template ---
-const withFullName = userEngine.query([
+const withFullName = usersRsJs.query([
     {
         op: 'map',
         transforms: [
@@ -28,7 +28,7 @@ console.log('\nFull names (template):');
 console.log(withFullName.value.map(u => `  ${u.fullName}`).join('\n'));
 
 // --- 3. Compute a new field: annual bonus = salary * 0.1 ---
-const withBonus = userEngine.query([
+const withBonus = usersRsJs.query([
     {
         op: 'map',
         transforms: [
@@ -48,7 +48,7 @@ console.log('\nSalary + 10% bonus:');
 console.log(withBonus.value.map(u => `  ${u.name}: $${u.salary} → bonus $${u.bonus}`).join('\n'));
 
 // --- 4. Add a literal field (tag all rows with a source label) ---
-const tagged = userEngine.query([
+const tagged = usersRsJs.query([
     {
         op: 'map',
         transforms: [
@@ -60,7 +60,7 @@ console.log('\nTagged rows (first 3):');
 console.log(tagged.value.slice(0, 3).map(u => `  ${u.name} — source: ${u.source}`).join('\n'));
 
 // --- 5. Multiple transforms in one pass: add tax + display label ---
-const enrichedOrders = orderEngine.query([
+const enrichedOrders = ordersRsJs.query([
     {
         op: 'map',
         transforms: [
@@ -86,7 +86,7 @@ console.log(enrichedOrders.value.slice(0, 4).map(o =>
 ).join('\n'));
 
 // --- 6. Filter first, then map (pipeline) ---
-const activeEmails = userEngine.query([
+const activeEmails = usersRsJs.query([
     { op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] },
     {
         op: 'map',
@@ -100,12 +100,12 @@ console.log(activeEmails.value.map(u => `  ${u.email}`).join('\n'));
 
 // --- 7. Zero-copy columnar map (mapRef) — field projection, no row objects ---
 console.log('\nSalary column (zero-copy via mapRef):');
-userEngine.mapRef(
+usersRsJs.mapRef(
     [{ op: 'map', transforms: [{ field: 'salary', expr: { type: 'field', name: 'salary' } }] }],
     (ref) => {
         console.log(' ', Array.from(ref.salary).map(v => `$${v}`).join(', '));
     }
 );
 
-userEngine.free();
-orderEngine.free();
+usersRsJs.free();
+ordersRsJs.free();

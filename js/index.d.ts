@@ -83,15 +83,15 @@ export interface MapRefView {
   [field: string]: Float64Array | Uint8Array | Uint16Array | StrColumnView | unknown[];
 }
 
-export interface DataEngineOptions {
+export interface RsJsOptions {
   smallRowThreshold?: number;
   filterThreshold?: number;
   mapThreshold?: number;
   groupByThreshold?: number;
 }
 
-export declare class DataEngine {
-  constructor(data: Record<string, unknown>[], options?: DataEngineOptions);
+export declare class RsJs {
+  constructor(data: Record<string, unknown>[], options?: RsJsOptions);
   query(operations: Operation[], options?: PipelineOptions): PipelineResult;
   /** Returns matching row indices as Uint32Array. */
   filterIndices(
@@ -106,7 +106,7 @@ export declare class DataEngine {
   ): unknown;
   /**
    * Zero-copy map for all expression types.
-   * Field projections → TypedArray subarrays (zero-copy into WASM memory, stable until engine.free()).
+   * Field projections → TypedArray subarrays (zero-copy into WASM memory, stable until rsjs.free()).
    * Arithmetic / numeric literals → Float64Array copied to JS heap (stable after callback).
    * Template / string literals → JS Array (strings cannot be zero-copy).
    */
@@ -122,7 +122,7 @@ export declare class DataEngine {
   free(): void;
 }
 
-export declare function createEngine(
+export declare function createRsJs(
   data: Record<string, unknown>[],
-  options?: DataEngineOptions,
-): Promise<DataEngine>;
+  options?: RsJsOptions,
+): Promise<RsJs>;

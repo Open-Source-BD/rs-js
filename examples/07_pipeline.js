@@ -2,15 +2,15 @@
 // Requires: wasm-pack build --release --target nodejs --out-dir pkg-node
 // Run:      node examples/07_pipeline.js
 
-const { DataEngine } = require('../js/index.node.cjs');
+const { RsJs } = require('../js/index.node.cjs');
 const { users, orders, events } = require('./data.js');
 
-const userEngine  = new DataEngine(users);
-const orderEngine = new DataEngine(orders);
-const eventEngine = new DataEngine(events);
+const usersRsJs  = new RsJs(users);
+const ordersRsJs = new RsJs(orders);
+const eventsRsJs = new RsJs(events);
 
 // --- 1. Analytics: active US users, grouped by department with avg salary ---
-const usTeamStats = userEngine.query([
+const usTeamStats = usersRsJs.query([
     {
         op: 'filter',
         logic: 'and',
@@ -34,15 +34,15 @@ Object.entries(usTeamStats.value).forEach(([dept, s]) => {
 });
 
 // --- 2. Revenue dashboard: completed orders → total + avg + count ---
-const totalRev   = orderEngine.query([
+const totalRev   = ordersRsJs.query([
     { op: 'filter', conditions: [{ field: 'status', operator: 'eq', value: 'completed' }] },
     { op: 'reduce', field: 'amount', reducer: 'sum' }
 ]);
-const avgRev     = orderEngine.query([
+const avgRev     = ordersRsJs.query([
     { op: 'filter', conditions: [{ field: 'status', operator: 'eq', value: 'completed' }] },
     { op: 'reduce', field: 'amount', reducer: 'avg' }
 ]);
-const orderCount = orderEngine.query([
+const orderCount = ordersRsJs.query([
     { op: 'filter', conditions: [{ field: 'status', operator: 'eq', value: 'completed' }] },
     { op: 'count' }
 ]);
@@ -52,7 +52,7 @@ console.log(`  average: $${avgRev.value.toFixed(2)}`);
 console.log(`  count:   ${orderCount.value}`);
 
 // --- 3. User enrichment: filter → map (add email + seniority score) ---
-const enriched = userEngine.query([
+const enriched = usersRsJs.query([
     {
         op: 'filter',
         logic: 'and',
@@ -86,7 +86,7 @@ console.log('\nEvent funnel:');
 const funnelStages = ['click', 'signup', 'purchase'];
 const funnel = funnelStages.map(type => ({
     type,
-    count: eventEngine.query([
+    count: eventsRsJs.query([
         { op: 'filter', conditions: [{ field: 'type', operator: 'eq', value: type }] },
         { op: 'count' }
     ]).value
@@ -98,7 +98,7 @@ funnel.forEach(({ type, count }, i) => {
 });
 
 // --- 5. Top earner: filter active adults → find highest salary ---
-const topEarner = userEngine.query([
+const topEarner = usersRsJs.query([
     {
         op: 'filter',
         logic: 'and',
@@ -112,7 +112,7 @@ const topEarner = userEngine.query([
 console.log(`\nTop earner (salary >= 140k): ${topEarner.value?.name} ($${topEarner.value?.salary})`);
 
 // --- 6. Country revenue breakdown from completed orders ---
-const countryRevenue = orderEngine.query([
+const countryRevenue = ordersRsJs.query([
     { op: 'filter', conditions: [{ field: 'status', operator: 'eq', value: 'completed' }] },
     {
         op: 'groupBy',
@@ -130,7 +130,7 @@ Object.entries(countryRevenue.value).forEach(([country, s]) => {
 
 // --- 7. Zero-copy columnar filter (filterViewRef) ---
 console.log('\nAge + salary columns for adults (zero-copy filterViewRef):');
-userEngine.filterViewRef(
+usersRsJs.filterViewRef(
     [{ op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 18 }] }],
     (ref) => {
         const ages    = Array.from(ref.columns.age);
@@ -139,6 +139,6 @@ userEngine.filterViewRef(
     }
 );
 
-userEngine.free();
-orderEngine.free();
-eventEngine.free();
+usersRsJs.free();
+ordersRsJs.free();
+eventsRsJs.free();

@@ -1,5 +1,5 @@
 'use strict';
-const { DataEngine } = require('../index.node.cjs');
+const { RsJs } = require('../index.node.cjs');
 
 // ─── shared fixture ───────────────────────────────────────────────────────────
 
@@ -14,7 +14,7 @@ const users = [
 
 describe('query — filter', () => {
     test('eq on boolean — returns only active users', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] }]);
         expect(r.type).toBe('array');
         expect(r.value.map(u => u.name)).toEqual(['Alice', 'Carol']);
@@ -25,7 +25,7 @@ describe('query — filter', () => {
     });
 
     test('eq on string — exact match', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'dept', operator: 'eq', value: 'eng' }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Alice', 'Bob']);
         expect(r.value[0].age).toBe(28);
@@ -34,14 +34,14 @@ describe('query — filter', () => {
     });
 
     test('ne on string — excludes matching rows', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'dept', operator: 'ne', value: 'eng' }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Carol', 'Dave']);
         e.free();
     });
 
     test('gt on number — strictly greater', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'age', operator: 'gt', value: 28 }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Carol']);
         expect(r.value[0].age).toBe(35);
@@ -49,14 +49,14 @@ describe('query — filter', () => {
     });
 
     test('gte on number — inclusive', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 28 }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Alice', 'Carol', 'Dave']);
         e.free();
     });
 
     test('lt on number', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'salary', operator: 'lt', value: 50000 }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Bob']); // only Bob salary=0 < 50000
         expect(r.value[0].salary).toBe(0);
@@ -64,14 +64,14 @@ describe('query — filter', () => {
     });
 
     test('lte on number', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'salary', operator: 'lte', value: 80000 }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Bob', 'Dave']);
         e.free();
     });
 
     test('and logic — both conditions must hold', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{
             op: 'filter', logic: 'and',
             conditions: [
@@ -85,7 +85,7 @@ describe('query — filter', () => {
     });
 
     test('or logic — either condition sufficient', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{
             op: 'filter', logic: 'or',
             conditions: [
@@ -98,35 +98,35 @@ describe('query — filter', () => {
     });
 
     test('contains — substring match on string field', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'name', operator: 'contains', value: 'li' }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Alice']);
         e.free();
     });
 
     test('startsWith', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'name', operator: 'startsWith', value: 'C' }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Carol']);
         e.free();
     });
 
     test('endsWith', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'name', operator: 'endsWith', value: 'e' }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Alice', 'Dave']);
         e.free();
     });
 
     test('in — value in list', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'dept', operator: 'in', value: ['sales'] }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Carol', 'Dave']);
         e.free();
     });
 
     test('notIn — value not in list', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'dept', operator: 'notIn', value: ['sales'] }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Alice', 'Bob']);
         e.free();
@@ -134,7 +134,7 @@ describe('query — filter', () => {
 
     test('isNull — matches null/missing field', () => {
         const data = [{ name: 'X', score: null }, { name: 'Y', score: 1 }, { name: 'Z' }];
-        const e = new DataEngine(data);
+        const e = new RsJs(data);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'score', operator: 'isNull', value: null }] }]);
         expect(r.value.map(u => u.name)).toEqual(['X', 'Z']);
         e.free();
@@ -142,14 +142,14 @@ describe('query — filter', () => {
 
     test('isNotNull — excludes null/missing field', () => {
         const data = [{ name: 'X', score: null }, { name: 'Y', score: 1 }, { name: 'Z' }];
-        const e = new DataEngine(data);
+        const e = new RsJs(data);
         const r = e.query([{ op: 'filter', conditions: [{ field: 'score', operator: 'isNotNull', value: null }] }]);
         expect(r.value.map(u => u.name)).toEqual(['Y']);
         e.free();
     });
 
     test('limit + offset windowing', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query(
             [{ op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 0 }] }],
             { offset: 1, limit: 2 }
@@ -161,7 +161,7 @@ describe('query — filter', () => {
 
 describe('query — map', () => {
     test('arithmetic multiply — adds computed field, preserves originals', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.1 } } }] }]);
         expect(r.type).toBe('array');
         expect(r.value.length).toBe(4);
@@ -175,14 +175,14 @@ describe('query — map', () => {
     });
 
     test('arithmetic add', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'map', transforms: [{ field: 'aged', expr: { type: 'arithmetic', op: '+', left: { type: 'field', name: 'age' }, right: { type: 'literal', value: 10 } } }] }]);
         expect(r.value.map(u => u.aged)).toEqual([38, 27, 45, 38]);
         e.free();
     });
 
     test('arithmetic subtract', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'map', transforms: [{ field: 'diff', expr: { type: 'arithmetic', op: '-', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 50000 } } }] }]);
         expect(r.value[0].diff).toBe(45000);   // Alice 95000-50000
         expect(r.value[1].diff).toBe(-50000);  // Bob 0-50000
@@ -190,7 +190,7 @@ describe('query — map', () => {
     });
 
     test('arithmetic divide — division by zero → null-like (NaN)', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'map', transforms: [{ field: 'rate', expr: { type: 'arithmetic', op: '/', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0 } } }] }]);
         // Rust: l / 0.0 = Infinity for non-zero, NaN for 0/0; WASM serialises these as null
         expect(r.value[1].rate == null || !isFinite(r.value[1].rate)).toBe(true);
@@ -198,14 +198,14 @@ describe('query — map', () => {
     });
 
     test('literal transform — constant value on every row', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'map', transforms: [{ field: 'tier', expr: { type: 'literal', value: 'gold' } }] }]);
         expect(r.value.every(u => u.tier === 'gold')).toBe(true);
         e.free();
     });
 
     test('template transform — interpolates row fields', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'map', transforms: [{ field: 'label', expr: { type: 'template', template: '{name} ({dept})' } }] }]);
         expect(r.value[0].label).toBe('Alice (eng)');
         expect(r.value[2].label).toBe('Carol (sales)');
@@ -213,7 +213,7 @@ describe('query — map', () => {
     });
 
     test('multiple transforms — all applied in one pass', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{
             op: 'map', transforms: [
                 { field: 'bonus', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.1 } } },
@@ -230,7 +230,7 @@ describe('query — map', () => {
 
 describe('query — filter → map pipeline', () => {
     test('filters rows then adds computed field — output same as chained JS', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([
             { op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] },
             { op: 'map', transforms: [{ field: 'bonus', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.1 } } }] },
@@ -248,7 +248,7 @@ describe('query — filter → map pipeline', () => {
     });
 
     test('windowing applies correctly to filter→map', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query(
             [
                 { op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 28 }] },
@@ -266,7 +266,7 @@ describe('query — filter → map pipeline', () => {
     });
 
     test('zero-result filter → map returns empty array', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([
             { op: 'filter', conditions: [{ field: 'salary', operator: 'gt', value: 999999 }] },
             { op: 'map', transforms: [{ field: 'bonus', expr: { type: 'literal', value: 1 } }] },
@@ -279,7 +279,7 @@ describe('query — filter → map pipeline', () => {
 
 describe('query — reduce', () => {
     test('sum — totals all values', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'reduce', field: 'salary', reducer: 'sum' }]);
         expect(r.type).toBe('number');
         expect(r.value).toBe(295000); // 95000+0+120000+80000
@@ -287,7 +287,7 @@ describe('query — reduce', () => {
     });
 
     test('avg — mean of all values', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'reduce', field: 'salary', reducer: 'avg' }]);
         expect(r.type).toBe('number');
         expect(r.value).toBeCloseTo(73750); // 295000/4
@@ -295,7 +295,7 @@ describe('query — reduce', () => {
     });
 
     test('min — smallest value', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'reduce', field: 'salary', reducer: 'min' }]);
         expect(r.type).toBe('number');
         expect(r.value).toBe(0); // Bob
@@ -303,7 +303,7 @@ describe('query — reduce', () => {
     });
 
     test('max — largest value', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'reduce', field: 'salary', reducer: 'max' }]);
         expect(r.type).toBe('number');
         expect(r.value).toBe(120000); // Carol
@@ -311,21 +311,21 @@ describe('query — reduce', () => {
     });
 
     test('first — value from first row', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'reduce', field: 'salary', reducer: 'first' }]);
         expect(r.value).toBe(95000); // Alice
         e.free();
     });
 
     test('last — value from last row', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'reduce', field: 'salary', reducer: 'last' }]);
         expect(r.value).toBe(80000); // Dave
         e.free();
     });
 
     test('filter → reduce sum (active users only)', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([
             { op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] },
             { op: 'reduce', field: 'salary', reducer: 'sum' },
@@ -335,7 +335,7 @@ describe('query — reduce', () => {
     });
 
     test('filter → reduce avg (eng dept)', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([
             { op: 'filter', conditions: [{ field: 'dept', operator: 'eq', value: 'eng' }] },
             { op: 'reduce', field: 'salary', reducer: 'avg' },
@@ -347,7 +347,7 @@ describe('query — reduce', () => {
 
 describe('query — count', () => {
     test('count all rows', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'count' }]);
         expect(r.type).toBe('number');
         expect(r.value).toBe(4);
@@ -355,14 +355,14 @@ describe('query — count', () => {
     });
 
     test('count truthy field — counts rows where field is truthy', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'count', field: 'active' }]);
         expect(r.value).toBe(2); // Alice + Carol
         e.free();
     });
 
     test('filter → count (adults)', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([
             { op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 18 }] },
             { op: 'count' },
@@ -373,7 +373,7 @@ describe('query — count', () => {
     });
 
     test('filter → count — zero results', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([
             { op: 'filter', conditions: [{ field: 'salary', operator: 'gt', value: 500000 }] },
             { op: 'count' },
@@ -385,7 +385,7 @@ describe('query — count', () => {
 
 describe('query — find', () => {
     test('finds first matching row and returns all its fields', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'find', conditions: [{ field: 'name', operator: 'eq', value: 'Carol' }] }]);
         expect(r.type).toBe('item');
         expect(r.value.name).toBe('Carol');
@@ -397,14 +397,14 @@ describe('query — find', () => {
     });
 
     test('returns first match when multiple rows qualify', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'find', conditions: [{ field: 'dept', operator: 'eq', value: 'eng' }] }]);
         expect(r.value.name).toBe('Alice'); // first eng row
         e.free();
     });
 
     test('not found returns null item', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'find', conditions: [{ field: 'name', operator: 'eq', value: 'Zara' }] }]);
         expect(r.type).toBe('item');
         expect(r.value).toBeNull();
@@ -412,7 +412,7 @@ describe('query — find', () => {
     });
 
     test('find with multiple and conditions', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{
             op: 'find', logic: 'and',
             conditions: [
@@ -428,7 +428,7 @@ describe('query — find', () => {
 
 describe('query — groupBy', () => {
     test('no aggregate — groups with rows and correct counts', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'groupBy', field: 'dept' }]);
         expect(r.type).toBe('array');
         expect(r.value.length).toBe(2);
@@ -443,7 +443,7 @@ describe('query — groupBy', () => {
     });
 
     test('aggregate sum — totals per group', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'groupBy', field: 'dept', aggregate: [{ field: 'salary', reducer: 'sum', alias: 'total_sal' }] }]);
         expect(r.type).toBe('object');
         expect(r.value.eng._count).toBe(2);
@@ -454,7 +454,7 @@ describe('query — groupBy', () => {
     });
 
     test('aggregate avg — mean salary per dept', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{ op: 'groupBy', field: 'dept', aggregate: [{ field: 'salary', reducer: 'avg', alias: 'avg_sal' }] }]);
         expect(r.value.eng.avg_sal).toBeCloseTo(47500);  // (95000+0)/2
         expect(r.value.sales.avg_sal).toBeCloseTo(100000); // (120000+80000)/2
@@ -462,7 +462,7 @@ describe('query — groupBy', () => {
     });
 
     test('aggregate min + max — multiple aggregates on same group', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([{
             op: 'groupBy', field: 'dept',
             aggregate: [
@@ -478,7 +478,7 @@ describe('query — groupBy', () => {
     });
 
     test('filter → groupBy + aggregate (active users only)', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const r = e.query([
             { op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] },
             { op: 'groupBy', field: 'dept', aggregate: [{ field: 'salary', reducer: 'sum', alias: 'total' }] },
@@ -496,19 +496,19 @@ describe('query — groupBy', () => {
 
 describe('len / is_empty', () => {
     test('len returns row count', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         expect(e.len()).toBe(4);
         e.free();
     });
 
     test('is_empty false for non-empty', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         expect(e.is_empty()).toBe(false);
         e.free();
     });
 
     test('is_empty true for empty array', () => {
-        const e = new DataEngine([]);
+        const e = new RsJs([]);
         expect(e.is_empty()).toBe(true);
         e.free();
     });
@@ -518,7 +518,7 @@ describe('len / is_empty', () => {
 
 describe('filterIndices', () => {
     test('returns Uint32Array of matching row indices', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const idx = e.filterIndices([{ op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] }]);
         expect(idx).toBeInstanceOf(Uint32Array);
         expect(Array.from(idx)).toEqual([0, 2]);
@@ -526,7 +526,7 @@ describe('filterIndices', () => {
     });
 
     test('windowed via offset + limit', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const idx = e.filterIndices(
             [{ op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 18 }] }],
             { offset: 1, limit: 2 }
@@ -540,7 +540,7 @@ describe('filterIndices', () => {
 
 describe('filterViewRef', () => {
     test('callback receives relative indices + full window columns', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let sel;
         e.filterViewRef(
             [{ op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] }],
@@ -556,7 +556,7 @@ describe('filterViewRef', () => {
     });
 
     test('string column categories are present', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let sel;
         e.filterViewRef(
             [{ op: 'filter', conditions: [{ field: 'dept', operator: 'eq', value: 'eng' }] }],
@@ -572,7 +572,7 @@ describe('filterViewRef', () => {
 
 describe('mapRef', () => {
     test('F64 field projection → Float64Array zero-copy view', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'income', expr: { type: 'field', name: 'salary' } }] }],
@@ -584,7 +584,7 @@ describe('mapRef', () => {
     });
 
     test('Bool field projection → Uint8Array zero-copy view', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'enabled', expr: { type: 'field', name: 'active' } }] }],
@@ -596,7 +596,7 @@ describe('mapRef', () => {
     });
 
     test('Str field projection → {codes: Uint16Array, categories}', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'team', expr: { type: 'field', name: 'dept' } }] }],
@@ -609,7 +609,7 @@ describe('mapRef', () => {
     });
 
     test('arithmetic → Float64Array stable after callback', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.1 } } }] }],
@@ -621,7 +621,7 @@ describe('mapRef', () => {
     });
 
     test('numeric literal → Float64Array stable after callback', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'tag', expr: { type: 'literal', value: 42 } }] }],
@@ -632,7 +632,7 @@ describe('mapRef', () => {
     });
 
     test('template → JS Array of strings', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'label', expr: { type: 'template', template: '{name}:{dept}' } }] }],
@@ -644,7 +644,7 @@ describe('mapRef', () => {
     });
 
     test('windowing via offset + limit', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'income', expr: { type: 'field', name: 'salary' } }] }],
@@ -656,7 +656,7 @@ describe('mapRef', () => {
     });
 
     test('empty window returns empty callback object', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'income', expr: { type: 'field', name: 'salary' } }] }],
@@ -672,7 +672,7 @@ describe('mapRef', () => {
 
 describe('groupByIndices', () => {
     test('string field → {key: Uint32Array}', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const idx = e.groupByIndices('dept');
         expect(idx.eng).toBeInstanceOf(Uint32Array);
         expect(idx.sales).toBeInstanceOf(Uint32Array);
@@ -682,7 +682,7 @@ describe('groupByIndices', () => {
     });
 
     test('boolean field → {true: Uint32Array, false: Uint32Array}', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const idx = e.groupByIndices('active');
         expect(idx.true).toBeInstanceOf(Uint32Array);
         expect(idx.false).toBeInstanceOf(Uint32Array);
@@ -694,7 +694,7 @@ describe('groupByIndices', () => {
     });
 
     test('numeric field → {value: Uint32Array} grouped by exact value', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const idx = e.groupByIndices('age');
         // Alice and Dave both age 28
         expect(idx['28']).toBeInstanceOf(Uint32Array);
@@ -705,7 +705,7 @@ describe('groupByIndices', () => {
     });
 
     test('unknown field returns empty object', () => {
-        const e = new DataEngine(users);
+        const e = new RsJs(users);
         const idx = e.groupByIndices('nonexistent');
         expect(Object.keys(idx).length).toBe(0);
         e.free();

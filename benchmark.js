@@ -1,5 +1,5 @@
 "use strict";
-const { DataEngine } = require("./js/index.node.cjs");
+const { RsJs } = require("./js/index.node.cjs");
 
 // ─── dataset generator ────────────────────────────────────────────────────────
 
@@ -273,41 +273,41 @@ function run() {
   for (const n of SIZES) {
     const data = generateData(n);
     const findId = Math.floor(n / 2);
-    const engine = new DataEngine(data);
+    const rsjs = new RsJs(data);
     const rows = [];
 
     rows.push(
       bench("filter  (age >= 18)", [
         () => jsFilter(data),
-        () => engine.query(filterOps),
+        () => rsjs.query(filterOps),
       ]),
     );
 
     rows.push(
       bench("map     (salary × 0.1)", [
         () => jsMap(data),
-        () => engine.query(mapOps),
+        () => rsjs.query(mapOps),
       ]),
     );
 
     rows.push(
       bench("mapRef      (salary × 0.1)", [
         () => jsMap(data),
-        () => engine.mapRef(mapOps, (ref) => ref),
+        () => rsjs.mapRef(mapOps, (ref) => ref),
       ]),
     );
 
     rows.push(
       bench("reduce  (sum active salaries)", [
         () => jsReduce(data),
-        () => engine.query(reduceOps),
+        () => rsjs.query(reduceOps),
       ]),
     );
 
     rows.push(
       bench("count   (age >= 18)", [
         () => jsCount(data),
-        () => engine.query(countOps),
+        () => rsjs.query(countOps),
       ]),
     );
 
@@ -315,7 +315,7 @@ function run() {
       bench("find    (by id)", [
         () => jsFind(data, findId),
         () =>
-          engine.query([
+          rsjs.query([
             {
               op: "find",
               conditions: [{ field: "id", operator: "eq", value: findId }],
@@ -327,35 +327,35 @@ function run() {
     rows.push(
       bench("groupBy (by department)", [
         () => jsGroupBy(data),
-        () => engine.query(groupByOps),
+        () => rsjs.query(groupByOps),
       ]),
     );
 
     rows.push(
       bench("groupBy + avg (by country)", [
         () => jsGroupByAgg(data),
-        () => engine.query(groupByAggOps),
+        () => rsjs.query(groupByAggOps),
       ]),
     );
 
     rows.push(
       bench("pipeline (filter → groupBy + avg)", [
         () => jsPipeline(data),
-        () => engine.query(pipelineOps),
+        () => rsjs.query(pipelineOps),
       ]),
     );
 
     rows.push(
       bench("pipeline (filter → map + bonus)", [
         () => jsFilterMap(data),
-        () => engine.query([...filterOps, ...mapOps]),
+        () => rsjs.query([...filterOps, ...mapOps]),
       ]),
     );
 
     rows.push(
       bench("filterViewRef (zero-copy)", [
         () => jsColumnarFilter(data),
-        () => engine.filterViewRef(filterOps, (ref) => ref),
+        () => rsjs.filterViewRef(filterOps, (ref) => ref),
       ]),
     );
 
@@ -363,7 +363,7 @@ function run() {
       bench("mapRef      (salary projection)", [
         () => jsColumnarProject(data),
         () =>
-          engine.mapRef(
+          rsjs.mapRef(
             [
               {
                 op: "map",
@@ -383,12 +383,12 @@ function run() {
     rows.push(
       bench("groupByIdx  (by department)", [
         () => jsGroupByIdxJs(data),
-        () => engine.groupByIndices("department"),
+        () => rsjs.groupByIndices("department"),
       ]),
     );
 
     printSection(n, rows);
-    engine.free();
+    rsjs.free();
   }
 
   console.log("\n  Notes:");
