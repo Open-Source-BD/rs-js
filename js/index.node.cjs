@@ -25,15 +25,71 @@ function applyWindow(data, options) {
     return data.slice(start, Math.min(end, data.length));
 }
 
+function evalMapExpr(row, expr) {
+    if (expr.type === 'literal') return expr.value;
+    if (expr.type === 'field')   return row[expr.name] ?? null;
+    if (expr.type === 'template') return expr.template.replace(/\{(\w+)\}/g, (_, k) => row[k] ?? '');
+    if (expr.type === 'arithmetic') {
+        const l = evalMapExpr(row, expr.left);
+        const r = evalMapExpr(row, expr.right);
+        if (expr.op === '+') return l + r;
+        if (expr.op === '-') return l - r;
+        if (expr.op === '*') return l * r;
+        if (expr.op === '/') return r === 0 ? null : l / r;
+    }
+    return null;
+}
+
+// Compile expr tree to a closure — eliminates per-row recursive dispatch.
+function compileExpr(expr) {
+    if (expr.type === 'literal') { const v = expr.value; return () => v; }
+    if (expr.type === 'field')   { const n = expr.name;  return (row) => row[n] ?? null; }
+    if (expr.type === 'template') {
+        const tpl = expr.template;
+        return (row) => tpl.replace(/\{(\w+)\}/g, (_, k) => row[k] ?? '');
+    }
+    if (expr.type === 'arithmetic') {
+        // fast path: field OP literal — single property access, no sub-closures
+        if (expr.left.type === 'field' && expr.right.type === 'literal') {
+            const n = expr.left.name, v = expr.right.value;
+            if (expr.op === '+') return (row) => row[n] + v;
+            if (expr.op === '-') return (row) => row[n] - v;
+            if (expr.op === '*') return (row) => row[n] * v;
+            if (expr.op === '/') return v === 0 ? () => null : (row) => row[n] / v;
+        }
+        // fast path: literal OP field
+        if (expr.left.type === 'literal' && expr.right.type === 'field') {
+            const v = expr.left.value, n = expr.right.name;
+            if (expr.op === '+') return (row) => v + row[n];
+            if (expr.op === '-') return (row) => v - row[n];
+            if (expr.op === '*') return (row) => v * row[n];
+            if (expr.op === '/') return (row) => { const r = row[n]; return r === 0 ? null : v / r; };
+        }
+        const L = compileExpr(expr.left), R = compileExpr(expr.right);
+        if (expr.op === '+') return (row) => L(row) + R(row);
+        if (expr.op === '-') return (row) => L(row) - R(row);
+        if (expr.op === '*') return (row) => L(row) * R(row);
+        if (expr.op === '/') return (row) => { const r = R(row); return r === 0 ? null : L(row) / r; };
+    }
+    return () => null;
+}
+
 function evalCondition(row, cond) {
     const value = row[cond.field];
     switch (cond.operator) {
-        case 'eq': return value === cond.value;
-        case 'ne': return value !== cond.value;
-        case 'gt': return value > cond.value;
-        case 'gte': return value >= cond.value;
-        case 'lt': return value < cond.value;
-        case 'lte': return value <= cond.value;
+        case 'eq':         return value === cond.value;
+        case 'ne':         return value !== cond.value;
+        case 'gt':         return value > cond.value;
+        case 'gte':        return value >= cond.value;
+        case 'lt':         return value < cond.value;
+        case 'lte':        return value <= cond.value;
+        case 'contains':   return typeof value === 'string' && typeof cond.value === 'string' && value.includes(cond.value);
+        case 'startsWith': return typeof value === 'string' && typeof cond.value === 'string' && value.startsWith(cond.value);
+        case 'endsWith':   return typeof value === 'string' && typeof cond.value === 'string' && value.endsWith(cond.value);
+        case 'in':         return Array.isArray(cond.value) && cond.value.includes(value);
+        case 'notIn':      return Array.isArray(cond.value) && !cond.value.includes(value);
+        case 'isNull':     return value == null;
+        case 'isNotNull':  return value != null;
         default: return false;
     }
 }
@@ -43,41 +99,23 @@ function evalConditions(row, conditions, logic = 'and') {
     return conditions.every((c) => evalCondition(row, c));
 }
 
-function evalMapExpr(row, expr) {
-    switch (expr.type) {
-        case 'literal': return expr.value;
-        case 'field': return row[expr.name] ?? null;
-        case 'template': {
-            let out = expr.template;
-            for (const [k, v] of Object.entries(row)) {
-                out = out.replaceAll(`{${k}}`, String(v));
-            }
-            return out;
-        }
-        case 'arithmetic': {
-            const l = Number(evalMapExpr(row, expr.left));
-            const r = Number(evalMapExpr(row, expr.right));
-            switch (expr.op) {
-                case '+': return l + r;
-                case '-': return l - r;
-                case '*': return l * r;
-                case '/': return r === 0 ? null : l / r;
-                default: return null;
-            }
-        }
-        default:
-            return null;
-    }
-}
-
-class DataEngine {
+class RsJs {
     constructor(data, options = {}) {
         this._data = data;
         this._engine = new InternalDataEngine(data);
         this._prepared = new Map();
-        this._smallRowThreshold = Number.isInteger(options.smallRowThreshold)
-            ? options.smallRowThreshold
-            : 2000;
+        // Per-operation crossover thresholds (tuned from benchmarks).
+        // smallRowThreshold overrides all for backward compatibility.
+        if (Number.isInteger(options.smallRowThreshold)) {
+            this._filterThreshold  = options.smallRowThreshold;
+            this._mapThreshold     = options.smallRowThreshold;
+            this._groupByThreshold = options.smallRowThreshold;
+        } else {
+            this._filterThreshold  = Number.isInteger(options.filterThreshold)  ? options.filterThreshold  : 15_000;
+            // Map always uses JS path for row-object output — mapRef+merge overhead > JS spread at any size.
+            this._mapThreshold     = Number.isInteger(options.mapThreshold)     ? options.mapThreshold     : Number.MAX_SAFE_INTEGER;
+            this._groupByThreshold = Number.isInteger(options.groupByThreshold) ? options.groupByThreshold : 30_000;
+        }
     }
 
     _getPrepared(operations) {
@@ -92,7 +130,7 @@ class DataEngine {
 
     _queryFilter(op, options) {
         const windowed = applyWindow(this._data, options);
-        if (windowed.length <= this._smallRowThreshold) {
+        if (windowed.length <= this._filterThreshold) {
             const rows = windowed.filter((r) => evalConditions(r, op.conditions, op.logic));
             return { type: 'array', value: rows };
         }
@@ -105,27 +143,80 @@ class DataEngine {
 
     _queryMap(op, options) {
         const windowed = applyWindow(this._data, options);
-        if (windowed.length <= this._smallRowThreshold) {
-            const rows = windowed.map((row) => {
-                const out = { ...row };
-                for (const t of op.transforms) out[t.field] = evalMapExpr(out, t.expr);
-                return out;
-            });
-            return { type: 'array', value: rows };
-        }
-
-        const computed = this._engine.mapField([{ op: 'map', transforms: op.transforms }], options);
-        const n = windowed.length;
-        const rows = new Array(n);
-        const entries = Object.entries(computed);
-        const n_fields = entries.length;
-
-        for (let i = 0; i < n; i++) {
-            const row = { ...windowed[i] };
-            for (let j = 0; j < n_fields; j++) {
-                row[entries[j][0]] = entries[j][1][i];
+        const transforms = op.transforms;
+        const tLen = transforms.length;
+        // Always use JS path: mapRef+merge overhead exceeds JS spread cost at all sizes.
+        if (windowed.length <= this._mapThreshold) {
+            if (tLen === 1) {
+                const { field, expr } = transforms[0];
+                const fn = compileExpr(expr);
+                return { type: 'array', value: windowed.map((row) => ({ ...row, [field]: fn(row) })) };
             }
-            rows[i] = row;
+            const fns = transforms.map((t) => compileExpr(t.expr));
+            return { type: 'array', value: windowed.map((row) => {
+                const out = { ...row };
+                for (let j = 0; j < tLen; j++) out[transforms[j].field] = fns[j](row);
+                return out;
+            })};
+        }
+        // WASM path (only reachable if mapThreshold overridden very low): pre-extract column arrays.
+        let cols;
+        this._engine.mapRef([op], options, (ref) => { cols = ref; });
+        const fields = transforms.map((t) => t.field);
+        const colArrays = fields.map((f) => cols[f]);
+        const len = windowed.length;
+        const rows = new Array(len);
+        if (tLen === 1) {
+            const field = fields[0], col = colArrays[0];
+            for (let i = 0; i < len; i++) rows[i] = { ...windowed[i], [field]: col[i] };
+        } else {
+            for (let i = 0; i < len; i++) {
+                const out = { ...windowed[i] };
+                for (let j = 0; j < tLen; j++) out[fields[j]] = colArrays[j][i];
+                rows[i] = out;
+            }
+        }
+        return { type: 'array', value: rows };
+    }
+
+    _queryFilterMap(filterOp, mapOp, options) {
+        const windowed = applyWindow(this._data, options);
+        const transforms = mapOp.transforms;
+        const tLen = transforms.length;
+        if (windowed.length <= this._filterThreshold) {
+            const filtered = windowed.filter((r) => evalConditions(r, filterOp.conditions, filterOp.logic));
+            if (tLen === 1) {
+                const { field, expr } = transforms[0];
+                const fn = compileExpr(expr);
+                return { type: 'array', value: filtered.map((row) => ({ ...row, [field]: fn(row) })) };
+            }
+            const fns = transforms.map((t) => compileExpr(t.expr));
+            return { type: 'array', value: filtered.map((row) => {
+                const out = { ...row };
+                for (let j = 0; j < tLen; j++) out[transforms[j].field] = fns[j](row);
+                return out;
+            })};
+        }
+        // WASM filterIndices + compiled map exprs — drops mapRef entirely.
+        const idx = this._engine.filterIndices([filterOp], options);
+        const m = idx.length;
+        if (m === 0) return { type: 'array', value: [] };
+        const rows = new Array(m);
+        if (tLen === 1) {
+            const { field, expr } = transforms[0];
+            const fn = compileExpr(expr);
+            for (let i = 0; i < m; i++) {
+                const row = this._data[idx[i]];
+                rows[i] = { ...row, [field]: fn(row) };
+            }
+        } else {
+            const fns = transforms.map((t) => compileExpr(t.expr));
+            for (let i = 0; i < m; i++) {
+                const row = this._data[idx[i]];
+                const out = { ...row };
+                for (let j = 0; j < tLen; j++) out[transforms[j].field] = fns[j](row);
+                rows[i] = out;
+            }
         }
         return { type: 'array', value: rows };
     }
@@ -136,7 +227,7 @@ class DataEngine {
 
         const field = fields[0];
         const windowed = applyWindow(this._data, options);
-        if (windowed.length <= this._smallRowThreshold) {
+        if (windowed.length <= this._groupByThreshold) {
             const groups = {};
             for (const row of windowed) {
                 const key = row[field] == null ? 'null' : String(row[field]);
@@ -172,6 +263,11 @@ class DataEngine {
         if (operations.length === 1 && operations[0].op === 'groupBy' && (!operations[0].aggregate || operations[0].aggregate.length === 0)) {
             return this._queryGroupByNoAgg(operations[0], options);
         }
+        if (operations.length === 2 &&
+            operations[0].op === 'filter' &&
+            operations[1].op === 'map') {
+            return this._queryFilterMap(operations[0], operations[1], options);
+        }
 
         const prepared = this._getPrepared(operations);
         return this._engine.queryPrepared(prepared, options);
@@ -191,11 +287,12 @@ class DataEngine {
         return this._engine.is_empty();
     }
 
-    // Exposed for advanced users
-    filterIndices(ops, opts) { return this._engine.filterIndices(ops, opts); }
-    filterView(ops, opts) { return this._engine.filterView(ops, opts); }
-    mapField(ops, opts) { return this._engine.mapField(ops, opts); }
-    groupByIndices(field) { return this._engine.groupByIndices(field); }
+    // Low-level zero-copy APIs
+    filterIndices(ops, opts)                         { return this._engine.filterIndices(ops, opts); }
+    filterViewRef(ops, callback, opts)               { return this._engine.filterViewRef(ops, opts, callback); }
+    filterMapRef(filterOps, mapOps, callback, opts)  { return this._engine.filterMapRef(filterOps, mapOps, opts, callback); }
+    mapRef(ops, callback, opts)                      { return this._engine.mapRef(ops, opts, callback); }
+    groupByIndices(field)                            { return this._engine.groupByIndices(field); }
 }
 
-module.exports = { DataEngine };
+module.exports = { RsJs };

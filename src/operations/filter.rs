@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::types::{Condition, ConditionLogic, Operator};
+    use crate::engine::execute_on_slice;
+    use crate::types::{
+        Condition, ConditionLogic, FilterOp, Operation, Operator, PipelineResult, Row,
+    };
     use serde_json::json;
 
     fn make_data() -> Vec<Row> {
@@ -23,15 +25,17 @@ mod tests {
 
     #[test]
     fn filter_gte() {
-        let op = FilterOp {
+        let ops = vec![Operation::Filter(FilterOp {
             conditions: vec![Condition {
                 field: "age".into(),
                 operator: Operator::Gte,
                 value: json!(18),
             }],
             logic: ConditionLogic::And,
-        };
-        let result = apply_filter(&make_data(), op).unwrap();
-        assert_eq!(result.len(), 2);
+        })];
+        match execute_on_slice(&make_data(), ops).unwrap() {
+            PipelineResult::Array(rows) => assert_eq!(rows.len(), 2),
+            _ => panic!("expected Array"),
+        }
     }
 }

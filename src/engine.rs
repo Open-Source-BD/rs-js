@@ -4,32 +4,10 @@ use crate::{
         count::apply_count, find::apply_find, group_by::apply_group_by, map::apply_map,
         reduce::apply_reduce,
     },
-    types::{DataError, Dataset, Operation, PipelineOptions, PipelineResult, Row},
+    types::{DataError, Operation, PipelineOptions, PipelineResult, Row},
 };
 
-// ── Legacy path: process_raw() passes owned Dataset ──────────────────────────
-
-pub struct Pipeline {
-    data: Dataset,
-}
-
-impl Pipeline {
-    pub fn new(mut data: Dataset, opts: PipelineOptions) -> Self {
-        if let Some(offset) = opts.offset {
-            data = data.into_iter().skip(offset).collect();
-        }
-        if let Some(limit) = opts.limit {
-            data.truncate(limit);
-        }
-        Self { data }
-    }
-
-    pub fn execute(self, ops: Vec<Operation>) -> Result<PipelineResult, DataError> {
-        execute_on_slice(&self.data, ops)
-    }
-}
-
-// ── Core engine: operates on &[Row] — used by both Pipeline and DataEngine ───
+// ── Core engine: operates on &[Row] ──────────────────────────────────────────
 
 /// Execute a pipeline on a borrowed slice.
 /// Intermediate ops (filter, map) produce owned subsets only when needed.
@@ -214,7 +192,7 @@ pub fn execute_for_engine(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Condition, ConditionLogic, CountOp, FilterOp, Operator, ReduceOp, Reducer};
+    use crate::types::{Condition, ConditionLogic, CountOp, Dataset, FilterOp, Operator, ReduceOp, Reducer};
     use serde_json::json;
 
     fn make_data() -> Dataset {

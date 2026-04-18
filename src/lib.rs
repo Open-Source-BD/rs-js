@@ -5,11 +5,12 @@ mod operations;
 mod types;
 
 use column_store::{Col, ColumnStore, try_columnar};
-use engine::{Pipeline, execute_for_engine};
+use engine::execute_for_engine;
 use js_sys::{Array, Float64Array, Object, Uint8Array, Uint16Array, Uint32Array};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use serde_wasm_bindgen::Serializer;
-use types::{DataError, Dataset, Operation, PipelineOptions};
+use types::{DataError, Dataset, FieldTransform, MapExpr, Operation, PipelineOptions, Row};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -135,14 +136,406 @@ impl DataEngine {
         Ok(obj.into())
     }
 
-    /// Returns columnar typed arrays for matching rows — no per-row object serialization.
-    /// F64 fields → Float64Array. Bool fields → Uint8Array.
-    /// Str fields → `{ codes: Uint16Array, categories: string[] }`.
-    #[wasm_bindgen(js_name = "filterView")]
-    pub fn filter_view(
+    /// Zero-copy map for all expression types.
+    /// Field projections → TypedArray subarrays into WASM memory (stable until engine.free()).
+    /// Arithmetic / numeric literals → Float64Array copied to JS heap (stable after callback).
+    /// Template / string literals → JS Array (strings cannot be zero-copy).
+    #[wasm_bindgen(js_name = "mapRef")]
+    pub fn map_ref(
         &self,
         operations: JsValue,
         options: Option<JsValue>,
+        callback: &js_sys::Function,
+    ) -> Result<JsValue, JsValue> {
+        let ops = deserialize_ops(operations)?;
+        let opts = deserialize_opts(options)?;
+        let start = opts.offset.unwrap_or(0).min(self.col_store.len);
+        let end = opts
+            .limit
+            .map(|l| (start + l).min(self.col_store.len))
+            .unwrap_or(self.col_store.len);
+
+        let out = Object::new();
+        if start >= end {
+            callback.call1(&JsValue::NULL, &out.into())?;
+            return Ok(JsValue::UNDEFINED);
+        }
+
+        // Collect all transforms across all map ops.
+        let mut transforms: Vec<&FieldTransform> = Vec::new();
+        for op in &ops {
+            let Operation::Map(map) = op else {
+                return Err(JsValue::from(DataError::InvalidExpr(
+                    "mapRef only supports map operations".into(),
+                )));
+            };
+            transforms.extend(map.transforms.iter());
+        }
+
+        // Phase 1 — Rust-heap allocations (may grow WASM linear memory).
+        // Arithmetic/literal → Vec<f64>. Template/string literal → JSON String.
+        // Col::Str field → pre-build categories JsValue (serde_json::to_string if high-cardinality).
+        enum Pre {
+            F64(Vec<f64>),   // arithmetic or numeric literal
+            Json(String),    // template or non-numeric literal
+            StrCats(JsValue),// Str field: pre-built categories
+            Nothing,         // F64/Bool field — no phase-1 work
+        }
+
+        let pre: Vec<Pre> = transforms
+            .iter()
+            .map(|t| -> Result<Pre, JsValue> {
+                match &t.expr {
+                    MapExpr::Arithmetic { .. } => {
+                        let mut vals = Vec::with_capacity(end - start);
+                        for row in &self.data[start..end] {
+                            let v = eval_map_expr_value(row, &t.expr)?;
+                            vals.push(v.as_f64().unwrap_or(f64::NAN));
+                        }
+                        Ok(Pre::F64(vals))
+                    }
+                    MapExpr::Literal { value } => {
+                        if let Some(n) = value.as_f64() {
+                            Ok(Pre::F64(vec![n; end - start]))
+                        } else {
+                            let strings: Vec<String> = (0..end - start)
+                                .map(|_| value.to_string())
+                                .collect();
+                            Ok(Pre::Json(
+                                serde_json::to_string(&strings)
+                                    .unwrap_or_else(|_| "[]".to_string()),
+                            ))
+                        }
+                    }
+                    MapExpr::Template { .. } => {
+                        let mut strings: Vec<String> = Vec::with_capacity(end - start);
+                        for row in &self.data[start..end] {
+                            let v = eval_map_expr_value(row, &t.expr)?;
+                            strings.push(
+                                v.as_str().map(|s| s.to_owned()).unwrap_or_default(),
+                            );
+                        }
+                        Ok(Pre::Json(
+                            serde_json::to_string(&strings)
+                                .unwrap_or_else(|_| "[]".to_string()),
+                        ))
+                    }
+                    MapExpr::Field { name } => {
+                        match self.col_store.cols.get(name.as_str()) {
+                            Some(Col::Str(sc)) => {
+                                let cats: JsValue = if sc.categories.len() > 500 {
+                                    let json = serde_json::to_string(
+                                        &sc.categories
+                                            .iter()
+                                            .map(|c| c.as_deref().unwrap_or("null"))
+                                            .collect::<Vec<_>>(),
+                                    )
+                                    .unwrap_or_else(|_| "[]".to_string());
+                                    js_sys::JSON::parse(&json).unwrap_or(JsValue::UNDEFINED)
+                                } else {
+                                    let arr = Array::new();
+                                    for cat in &sc.categories {
+                                        arr.push(&JsValue::from(
+                                            cat.as_deref().unwrap_or("null"),
+                                        ));
+                                    }
+                                    arr.into()
+                                };
+                                Ok(Pre::StrCats(cats))
+                            }
+                            _ => Ok(Pre::Nothing),
+                        }
+                    }
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Phase 2 — capture WASM memory buffer (no more Rust allocations after this).
+        let memory = wasm_bindgen::memory()
+            .dyn_into::<js_sys::WebAssembly::Memory>()?
+            .buffer();
+
+        // Phase 3 — build output object using stable memory reference.
+        for (transform, p) in transforms.iter().zip(pre.iter()) {
+            let val: JsValue = match (&transform.expr, p) {
+                (MapExpr::Arithmetic { .. } | MapExpr::Literal { .. }, Pre::F64(vals)) => {
+                    let arr = Float64Array::new_with_length(vals.len() as u32);
+                    arr.copy_from(vals);
+                    arr.into()
+                }
+                (MapExpr::Template { .. } | MapExpr::Literal { .. }, Pre::Json(json)) => {
+                    js_sys::JSON::parse(json).unwrap_or(JsValue::UNDEFINED)
+                }
+                (MapExpr::Field { name }, Pre::Nothing) => {
+                    match self.col_store.cols.get(name.as_str()) {
+                        Some(Col::F64(v)) => {
+                            let offset = v.as_ptr() as u32 / 8;
+                            Float64Array::new(&memory)
+                                .subarray(offset + start as u32, offset + end as u32)
+                                .into()
+                        }
+                        Some(Col::Bool(v)) => {
+                            let offset = v.as_ptr() as u32;
+                            Uint8Array::new(&memory)
+                                .subarray(offset + start as u32, offset + end as u32)
+                                .into()
+                        }
+                        _ => JsValue::UNDEFINED,
+                    }
+                }
+                (MapExpr::Field { name }, Pre::StrCats(cats)) => {
+                    let sc = match self.col_store.cols.get(name.as_str()) {
+                        Some(Col::Str(sc)) => sc,
+                        _ => {
+                            js_sys::Reflect::set(
+                                &out,
+                                &JsValue::from(&*transform.field),
+                                &JsValue::UNDEFINED,
+                            )?;
+                            continue;
+                        }
+                    };
+                    let offset = sc.codes.as_ptr() as u32 / 2;
+                    let codes = Uint16Array::new(&memory)
+                        .subarray(offset + start as u32, offset + end as u32);
+                    let obj = Object::new();
+                    js_sys::Reflect::set(&obj, &"codes".into(), &codes.into())?;
+                    js_sys::Reflect::set(&obj, &"categories".into(), cats)?;
+                    obj.into()
+                }
+                _ => JsValue::UNDEFINED,
+            };
+            js_sys::Reflect::set(&out, &JsValue::from(&*transform.field), &val)?;
+        }
+
+        // Phase 4 — invoke callback. Float64Array views over `pre` Vecs are valid here.
+        callback.call1(&JsValue::NULL, &out.into())?;
+        // `pre` dropped here — Float64Array views into WASM-heap Vecs are invalidated.
+        Ok(JsValue::UNDEFINED)
+    }
+
+    /// Combined filter + map → gathered typed-array columns. Zero row-object creation.
+    /// Returns all original columns (gathered to matched rows) plus computed transform columns.
+    /// Views are valid only inside the callback; do not retain them after it returns.
+    #[wasm_bindgen(js_name = "filterMapRef")]
+    pub fn filter_map_ref(
+        &self,
+        filter_operations: JsValue,
+        map_operations: JsValue,
+        options: Option<JsValue>,
+        callback: &js_sys::Function,
+    ) -> Result<JsValue, JsValue> {
+        let filter_ops = deserialize_ops(filter_operations)?;
+        let map_ops = deserialize_ops(map_operations)?;
+        let opts = deserialize_opts(options)?;
+
+        let start = opts.offset.unwrap_or(0).min(self.col_store.len);
+        let end = opts
+            .limit
+            .map(|l| (start + l).min(self.col_store.len))
+            .unwrap_or(self.col_store.len);
+
+        let indices: Vec<u32> = match filter_ops.as_slice() {
+            [Operation::Filter(f)] => {
+                self.col_store
+                    .filter_indices(&f.conditions, &f.logic, start, end)
+            }
+            _ => (start as u32..end as u32).collect(),
+        };
+        let count = indices.len();
+
+        let mut transforms: Vec<&FieldTransform> = Vec::new();
+        for op in &map_ops {
+            match op {
+                Operation::Map(m) => transforms.extend(m.transforms.iter()),
+                _ => {
+                    return Err(JsValue::from(DataError::InvalidExpr(
+                        "filterMapRef: map_operations must contain only map ops".into(),
+                    )));
+                }
+            }
+        }
+
+        // Phase 1 — all Rust-heap allocations before capturing the memory snapshot.
+        enum GCol {
+            F64(Vec<f64>),
+            Bool(Vec<u8>),
+            Str { codes: Vec<u16>, cats: JsValue },
+        }
+
+        let gathered: Vec<(&str, GCol)> = self
+            .col_store
+            .cols
+            .iter()
+            .map(|(name, col)| -> Result<(&str, GCol), JsValue> {
+                let gc = match col {
+                    Col::F64(v) => {
+                        GCol::F64(indices.iter().map(|&i| v[i as usize]).collect())
+                    }
+                    Col::Bool(v) => {
+                        GCol::Bool(indices.iter().map(|&i| v[i as usize]).collect())
+                    }
+                    Col::Str(sc) => {
+                        let codes: Vec<u16> =
+                            indices.iter().map(|&i| sc.codes[i as usize]).collect();
+                        let cats: JsValue = if sc.categories.len() > 500 {
+                            let json = serde_json::to_string(
+                                &sc.categories
+                                    .iter()
+                                    .map(|c| c.as_deref().unwrap_or("null"))
+                                    .collect::<Vec<_>>(),
+                            )
+                            .unwrap_or_else(|_| "[]".to_string());
+                            js_sys::JSON::parse(&json).unwrap_or(JsValue::UNDEFINED)
+                        } else {
+                            let arr = Array::new();
+                            for cat in &sc.categories {
+                                arr.push(&JsValue::from(cat.as_deref().unwrap_or("null")));
+                            }
+                            arr.into()
+                        };
+                        GCol::Str { codes, cats }
+                    }
+                };
+                Ok((name.as_str(), gc))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        enum ComputedCol {
+            F64(Vec<f64>),
+            Json(String),
+        }
+
+        let computed: Vec<(&str, ComputedCol)> = transforms
+            .iter()
+            .map(|t| -> Result<(&str, ComputedCol), JsValue> {
+                let col = match &t.expr {
+                    MapExpr::Field { name } => match self.col_store.cols.get(name.as_str()) {
+                        Some(Col::F64(v)) => {
+                            ComputedCol::F64(indices.iter().map(|&i| v[i as usize]).collect())
+                        }
+                        Some(Col::Bool(v)) => ComputedCol::F64(
+                            indices.iter().map(|&i| v[i as usize] as f64).collect(),
+                        ),
+                        _ => ComputedCol::F64(vec![f64::NAN; count]),
+                    },
+                    MapExpr::Literal { value } => {
+                        if let Some(n) = value.as_f64() {
+                            ComputedCol::F64(vec![n; count])
+                        } else {
+                            let strings: Vec<String> =
+                                (0..count).map(|_| value.to_string()).collect();
+                            ComputedCol::Json(
+                                serde_json::to_string(&strings)
+                                    .unwrap_or_else(|_| "[]".to_string()),
+                            )
+                        }
+                    }
+                    MapExpr::Template { .. } => {
+                        let mut strings = Vec::with_capacity(count);
+                        for &idx in &indices {
+                            let row = &self.data[idx as usize];
+                            let v = eval_map_expr_value(row, &t.expr)?;
+                            strings
+                                .push(v.as_str().map(|s| s.to_owned()).unwrap_or_default());
+                        }
+                        ComputedCol::Json(
+                            serde_json::to_string(&strings)
+                                .unwrap_or_else(|_| "[]".to_string()),
+                        )
+                    }
+                    MapExpr::Arithmetic { .. } => {
+                        let mut vals = Vec::with_capacity(count);
+                        for &idx in &indices {
+                            let row = &self.data[idx as usize];
+                            let v = eval_map_expr_value(row, &t.expr)?;
+                            vals.push(v.as_f64().unwrap_or(f64::NAN));
+                        }
+                        ComputedCol::F64(vals)
+                    }
+                };
+                Ok((t.field.as_str(), col))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Phase 2 — capture WASM memory (no more Rust allocations after this).
+        let memory = wasm_bindgen::memory()
+            .dyn_into::<js_sys::WebAssembly::Memory>()?
+            .buffer();
+
+        // Phase 3 — build output with zero-copy views into gathered Vecs.
+        let out = Object::new();
+
+        let idx_arr = Uint32Array::new_with_length(count as u32);
+        idx_arr.copy_from(&indices);
+        js_sys::Reflect::set(&out, &"count".into(), &JsValue::from(count as u32))?;
+        js_sys::Reflect::set(&out, &"indices".into(), &idx_arr.into())?;
+
+        let cols_obj = Object::new();
+
+        for (name, gc) in &gathered {
+            let val: JsValue = match gc {
+                GCol::F64(v) => {
+                    let offset = v.as_ptr() as u32 / 8;
+                    Float64Array::new(&memory)
+                        .subarray(offset, offset + count as u32)
+                        .into()
+                }
+                GCol::Bool(v) => {
+                    let offset = v.as_ptr() as u32;
+                    Uint8Array::new(&memory)
+                        .subarray(offset, offset + count as u32)
+                        .into()
+                }
+                GCol::Str { codes, cats } => {
+                    let offset = codes.as_ptr() as u32 / 2;
+                    let codes_view = Uint16Array::new(&memory)
+                        .subarray(offset, offset + count as u32);
+                    let obj = Object::new();
+                    js_sys::Reflect::set(&obj, &"codes".into(), &codes_view.into())?;
+                    js_sys::Reflect::set(&obj, &"categories".into(), cats)?;
+                    obj.into()
+                }
+            };
+            js_sys::Reflect::set(&cols_obj, &JsValue::from(*name), &val)?;
+        }
+
+        for (field_name, cc) in &computed {
+            let val: JsValue = match cc {
+                ComputedCol::F64(v) => {
+                    let offset = v.as_ptr() as u32 / 8;
+                    Float64Array::new(&memory)
+                        .subarray(offset, offset + count as u32)
+                        .into()
+                }
+                ComputedCol::Json(json) => {
+                    js_sys::JSON::parse(json).unwrap_or(JsValue::UNDEFINED)
+                }
+            };
+            js_sys::Reflect::set(&cols_obj, &JsValue::from(*field_name), &val)?;
+        }
+
+        js_sys::Reflect::set(&out, &"columns".into(), &cols_obj.into())?;
+
+        callback.call1(&JsValue::NULL, &out.into())?;
+        // gathered + computed drop here — views into their Vecs become invalid
+        Ok(JsValue::UNDEFINED)
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    #[wasm_bindgen(js_name = "filterViewRef")]
+    pub fn filter_view_ref(
+        &self,
+        operations: JsValue,
+        options: Option<JsValue>,
+        callback: &js_sys::Function,
     ) -> Result<JsValue, JsValue> {
         let ops = deserialize_ops(operations)?;
         let opts = deserialize_opts(options)?;
@@ -160,77 +553,92 @@ impl DataEngine {
             _ => (start as u32..end as u32).collect(),
         };
 
+        if indices.is_empty() {
+            callback.call1(&JsValue::NULL, &Object::new().into())?;
+            return Ok(JsValue::UNDEFINED);
+        }
+
+        let relative = Uint32Array::new_with_length(indices.len() as u32);
+        let rel_values: Vec<u32> = indices.iter().map(|&i| i - start as u32).collect();
+        relative.copy_from(&rel_values);
+
         let out = Object::new();
-        for (name, col) in &self.col_store.cols {
+        let columns = self.window_column_views(start, end)?;
+        js_sys::Reflect::set(&out, &"indices".into(), &relative.into())?;
+        js_sys::Reflect::set(&out, &"columns".into(), &columns)?;
+
+        callback.call1(&JsValue::NULL, &out.into())?;
+        Ok(JsValue::UNDEFINED)
+    }
+
+    fn window_column_views(&self, start: usize, end: usize) -> Result<JsValue, JsValue> {
+        // Phase 1 — pre-compute string categories (serde_json::to_string may grow WASM
+        // linear memory, which detaches any wasm.memory.buffer captured before this).
+        // We do all Rust allocations here before taking the memory snapshot.
+        let cats_by_col: Vec<Option<JsValue>> = self
+            .col_store
+            .cols
+            .values()
+            .map(|col| {
+                let Col::Str(sc) = col else { return None };
+                let val: JsValue = if sc.categories.len() > 500 {
+                    // JSON.parse is orders of magnitude faster than N individual
+                    // Array::push() calls across the WASM→JS boundary.
+                    let json = serde_json::to_string(
+                        &sc.categories
+                            .iter()
+                            .map(|c| c.as_deref().unwrap_or("null"))
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap_or_else(|_| "[]".to_string());
+                    js_sys::JSON::parse(&json).unwrap_or(JsValue::UNDEFINED)
+                } else {
+                    let arr = Array::new();
+                    for cat in &sc.categories {
+                        arr.push(&JsValue::from(cat.as_deref().unwrap_or("null")));
+                    }
+                    arr.into()
+                };
+                Some(val)
+            })
+            .collect();
+
+        // Phase 2 — capture memory buffer once all Rust allocations are done.
+        let memory = wasm_bindgen::memory()
+            .dyn_into::<js_sys::WebAssembly::Memory>()?
+            .buffer();
+
+        // Phase 3 — build typed-array views; no Rust allocations from here on.
+        let out = Object::new();
+        for ((name, col), maybe_cats) in self.col_store.cols.iter().zip(cats_by_col) {
             let val: JsValue = match col {
                 Col::F64(v) => {
-                    let arr = Float64Array::new_with_length(indices.len() as u32);
-                    let gathered: Vec<f64> = indices.iter().map(|&i| v[i as usize]).collect();
-                    arr.copy_from(&gathered);
-                    arr.into()
+                    let offset = v.as_ptr() as u32 / 8;
+                    Float64Array::new(&memory)
+                        .subarray(offset + start as u32, offset + end as u32)
+                        .into()
                 }
                 Col::Bool(v) => {
-                    let arr = Uint8Array::new_with_length(indices.len() as u32);
-                    let gathered: Vec<u8> = indices.iter().map(|&i| v[i as usize]).collect();
-                    arr.copy_from(&gathered);
-                    arr.into()
+                    let offset = v.as_ptr() as u32;
+                    Uint8Array::new(&memory)
+                        .subarray(offset + start as u32, offset + end as u32)
+                        .into()
                 }
                 Col::Str(sc) => {
-                    let codes_arr = Uint16Array::new_with_length(indices.len() as u32);
-                    let gathered: Vec<u16> =
-                        indices.iter().map(|&i| sc.codes[i as usize]).collect();
-                    codes_arr.copy_from(&gathered);
-                    let cats_arr = Array::new();
-                    for cat in &sc.categories {
-                        cats_arr.push(&JsValue::from(cat.as_deref().unwrap_or("null")));
-                    }
+                    let offset = sc.codes.as_ptr() as u32 / 2;
+                    let codes = Uint16Array::new(&memory)
+                        .subarray(offset + start as u32, offset + end as u32);
+                    let cats_val = maybe_cats.unwrap_or(JsValue::UNDEFINED);
                     let obj = Object::new();
-                    js_sys::Reflect::set(&obj, &"codes".into(), &codes_arr.into())?;
-                    js_sys::Reflect::set(&obj, &"categories".into(), &cats_arr.into())?;
+                    js_sys::Reflect::set(&obj, &"codes".into(), &codes.into())?;
+                    js_sys::Reflect::set(&obj, &"categories".into(), &cats_val)?;
                     obj.into()
                 }
             };
-            js_sys::Reflect::set(&out, &JsValue::from(&**name), &val)?;
+            js_sys::Reflect::set(&out, &JsValue::from(name), &val)?;
         }
+
         Ok(out.into())
-    }
-
-    /// Compute new field(s) from map ops — returns `{ fieldName: Float64Array }`.
-    /// Only the computed columns, not full rows. Use for arithmetic transforms.
-    #[wasm_bindgen(js_name = "mapField")]
-    pub fn map_field(
-        &self,
-        operations: JsValue,
-        options: Option<JsValue>,
-    ) -> Result<JsValue, JsValue> {
-        let ops = deserialize_ops(operations)?;
-        let opts = deserialize_opts(options)?;
-        let start = opts.offset.unwrap_or(0).min(self.col_store.len);
-        let end = opts
-            .limit
-            .map(|l| (start + l).min(self.col_store.len))
-            .unwrap_or(self.col_store.len);
-
-        let out = Object::new();
-        for op in &ops {
-            if let Operation::Map(m) = op {
-                for transform in &m.transforms {
-                    let vals = self.col_store.compute_field(&transform.expr, start, end);
-                    let arr = Float64Array::new_with_length(vals.len() as u32);
-                    arr.copy_from(&vals);
-                    js_sys::Reflect::set(&out, &JsValue::from(&*transform.field), &arr.into())?;
-                }
-            }
-        }
-        Ok(out.into())
-    }
-
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
     }
 }
 
@@ -265,6 +673,51 @@ fn deserialize_opts(val: Option<JsValue>) -> Result<PipelineOptions, JsValue> {
             })
         }
         _ => Ok(PipelineOptions::default()),
+    }
+}
+
+fn eval_map_expr_value(row: &Row, expr: &MapExpr) -> Result<Value, JsValue> {
+    match expr {
+        MapExpr::Literal { value } => Ok(value.clone()),
+        MapExpr::Field { name } => Ok(row.get(name).cloned().unwrap_or(Value::Null)),
+        MapExpr::Template { template } => {
+            let mut result = template.clone();
+            for (k, v) in row {
+                let placeholder = format!("{{{}}}", k);
+                let replacement = match v {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                result = result.replace(&placeholder, &replacement);
+            }
+            Ok(Value::String(result))
+        }
+        MapExpr::Arithmetic { op, left, right } => {
+            let l = eval_map_expr_value(row, left)?.as_f64().ok_or_else(|| {
+                JsValue::from(DataError::InvalidExpr("left operand not a number".into()))
+            })?;
+            let r = eval_map_expr_value(row, right)?.as_f64().ok_or_else(|| {
+                JsValue::from(DataError::InvalidExpr("right operand not a number".into()))
+            })?;
+            let result = match op {
+                types::ArithOp::Add => l + r,
+                types::ArithOp::Sub => l - r,
+                types::ArithOp::Mul => l * r,
+                types::ArithOp::Div => {
+                    if r == 0.0 {
+                        return Err(JsValue::from(DataError::InvalidExpr(
+                            "division by zero".into(),
+                        )));
+                    }
+                    l / r
+                }
+            };
+            serde_json::Number::from_f64(result)
+                .map(Value::Number)
+                .ok_or_else(|| {
+                    JsValue::from(DataError::InvalidExpr("result is NaN or Infinity".into()))
+                })
+        }
     }
 }
 
