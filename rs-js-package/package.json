@@ -1,0 +1,9 @@
+{
+  "name": "rs-js-package",
+  "version": "1.0.0",
+  "description": "Example project using rs-js",
+  "main": "index.js",
+  "dependencies": {
+    "@shaon07/rs-js": "^0.1.4"
+  }
+}

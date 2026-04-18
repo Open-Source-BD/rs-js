@@ -1,0 +1,15 @@
+{
+  "name": "rs-js",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "rs_js_bg.wasm",
+    "rs_js.js",
+    "rs_js.d.ts"
+  ],
+  "main": "rs_js.js",
+  "types": "rs_js.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
