@@ -559,32 +559,26 @@ describe('mapRef', () => {
         e.free();
     });
 
-    test('arithmetic → Float64Array zero-copy view over WASM Vec', () => {
+    test('arithmetic → Float64Array stable after callback', () => {
         const e = new DataEngine(users);
-        let result;
+        let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.1 } } }] }],
-            (ref) => {
-                // Arithmetic views backed by temp WASM Vec — must consume inside callback.
-                expect(ref.bonus).toBeInstanceOf(Float64Array);
-                result = Array.from(ref.bonus);
-            }
+            (ref) => { view = ref; }
         );
-        expect(result).toEqual([9500, 0, 12000, 8000]);
+        expect(view.bonus).toBeInstanceOf(Float64Array);
+        expect(Array.from(view.bonus)).toEqual([9500, 0, 12000, 8000]);
         e.free();
     });
 
-    test('numeric literal → Float64Array view', () => {
+    test('numeric literal → Float64Array stable after callback', () => {
         const e = new DataEngine(users);
-        let result;
+        let view;
         e.mapRef(
             [{ op: 'map', transforms: [{ field: 'tag', expr: { type: 'literal', value: 42 } }] }],
-            (ref) => {
-                // Literal views backed by temp WASM Vec — must consume inside callback.
-                result = Array.from(ref.tag);
-            }
+            (ref) => { view = ref; }
         );
-        expect(result).toEqual([42, 42, 42, 42]);
+        expect(Array.from(view.tag)).toEqual([42, 42, 42, 42]);
         e.free();
     });
 

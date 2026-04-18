@@ -105,10 +105,9 @@ export declare class DataEngine {
   ): unknown;
   /**
    * Zero-copy map for all expression types.
-   * Field projections → TypedArray subarrays (zero-copy into WASM memory).
-   * Arithmetic / numeric literals → Float64Array view over WASM-heap Vec.
+   * Field projections → TypedArray subarrays (zero-copy into WASM memory, stable until engine.free()).
+   * Arithmetic / numeric literals → Float64Array copied to JS heap (stable after callback).
    * Template / string literals → JS Array (strings cannot be zero-copy).
-   * Views are only valid during the callback.
    */
   mapRef(
     operations: Operation[],

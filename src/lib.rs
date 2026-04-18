@@ -137,10 +137,9 @@ impl DataEngine {
     }
 
     /// Zero-copy map for all expression types.
-    /// Field projections → TypedArray subarrays into WASM memory.
-    /// Arithmetic / numeric literals → Float64Array view over a WASM-heap Vec.
+    /// Field projections → TypedArray subarrays into WASM memory (stable until engine.free()).
+    /// Arithmetic / numeric literals → Float64Array copied to JS heap (stable after callback).
     /// Template / string literals → JS Array (strings cannot be zero-copy).
-    /// Views are only valid during the callback; hold no references after it returns.
     #[wasm_bindgen(js_name = "mapRef")]
     pub fn map_ref(
         &self,
@@ -260,9 +259,9 @@ impl DataEngine {
         for (transform, p) in transforms.iter().zip(pre.iter()) {
             let val: JsValue = match (&transform.expr, p) {
                 (MapExpr::Arithmetic { .. } | MapExpr::Literal { .. }, Pre::F64(vals)) => {
-                    // Zero-copy: Float64Array view over WASM-heap Vec.
-                    // Valid only until `pre` is dropped (after callback).
-                    unsafe { Float64Array::view(vals) }.into()
+                    let arr = Float64Array::new_with_length(vals.len() as u32);
+                    arr.copy_from(vals);
+                    arr.into()
                 }
                 (MapExpr::Template { .. } | MapExpr::Literal { .. }, Pre::Json(json)) => {
                     js_sys::JSON::parse(json).unwrap_or(JsValue::UNDEFINED)
