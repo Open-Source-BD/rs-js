@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // ── real benchmark data (measured via node benchmark.js) ──────────────────────
 const BENCH = {
@@ -244,7 +244,7 @@ export default function PerformanceBenchmark() {
       </div>
 
       {/* Dataset size tabs */}
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-2 mb-6 overflow-y-scroll">
         <span className="text-xs text-slate-500 mr-1">Dataset:</span>
         {SIZES.map((s) => (
           <button
