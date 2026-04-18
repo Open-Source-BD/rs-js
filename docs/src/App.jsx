@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
-import { categories } from './data/api.js';
-import Sidebar from './components/Sidebar.jsx';
-import MethodCard from './components/MethodCard.jsx';
+import { useEffect, useState } from 'react';
 import CodeBlock from './components/CodeBlock.jsx';
+import MethodCard from './components/MethodCard.jsx';
 import PerformanceBenchmark from './components/PerformanceBenchmark.jsx';
+import Sidebar from './components/Sidebar.jsx';
 import TypesSection from './components/TypesSection.jsx';
+import { categories } from './data/api.js';
 
 function MenuIcon() {
   return (
@@ -109,7 +109,7 @@ export default function App() {
 
         <div className="flex items-center gap-3">
           <span className="text-xs bg-violet-500/15 text-violet-400 border border-violet-500/30 px-2 py-0.5 rounded font-mono hidden sm:block">
-            v1.0.0
+            v0.1.2
           </span>
           <a
             href="https://github.com/shaon07/rs-js"
