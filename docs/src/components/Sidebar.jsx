@@ -115,6 +115,20 @@ export default function Sidebar({ categories, activeId, search, onSearchChange, 
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-3">
+          {/* Performance link — always shown when not searching */}
+          {!search && (
+            <a
+              href="#performance"
+              className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-semibold mb-2 transition-colors ${
+                activeId === 'performance'
+                  ? 'bg-violet-500/15 text-violet-300 border-l-2 border-violet-500 pl-2.5'
+                  : 'text-slate-300 hover:text-slate-100 hover:bg-slate-800/40'
+              }`}
+            >
+              <span className="text-xs">⚡</span>
+              Performance
+            </a>
+          )}
           {categories.length === 0 ? (
             <p className="text-slate-500 text-sm px-3 py-4 text-center">No results for "{search}"</p>
           ) : (

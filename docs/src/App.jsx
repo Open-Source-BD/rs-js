@@ -3,6 +3,7 @@ import { categories } from './data/api.js';
 import Sidebar from './components/Sidebar.jsx';
 import MethodCard from './components/MethodCard.jsx';
 import CodeBlock from './components/CodeBlock.jsx';
+import PerformanceBenchmark from './components/PerformanceBenchmark.jsx';
 
 function MenuIcon() {
   return (
@@ -203,6 +204,9 @@ export default function App() {
               <CodeBlock code={QUICK_START_CODE} />
             </div>
           </div>
+
+          {/* Performance section */}
+          {!search && <PerformanceBenchmark />}
 
           {/* Method sections */}
           {filteredCategories.map((category) => (
