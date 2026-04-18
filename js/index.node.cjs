@@ -25,6 +25,21 @@ function applyWindow(data, options) {
     return data.slice(start, Math.min(end, data.length));
 }
 
+function evalMapExpr(row, expr) {
+    if (expr.type === 'literal') return expr.value;
+    if (expr.type === 'field')   return row[expr.name] ?? null;
+    if (expr.type === 'template') return expr.template.replace(/\{(\w+)\}/g, (_, k) => row[k] ?? '');
+    if (expr.type === 'arithmetic') {
+        const l = evalMapExpr(row, expr.left);
+        const r = evalMapExpr(row, expr.right);
+        if (expr.op === '+') return l + r;
+        if (expr.op === '-') return l - r;
+        if (expr.op === '*') return l * r;
+        if (expr.op === '/') return r === 0 ? null : l / r;
+    }
+    return null;
+}
+
 function evalCondition(row, cond) {
     const value = row[cond.field];
     switch (cond.operator) {
@@ -59,10 +74,12 @@ class DataEngine {
         // smallRowThreshold overrides all for backward compatibility.
         if (Number.isInteger(options.smallRowThreshold)) {
             this._filterThreshold  = options.smallRowThreshold;
+            this._mapThreshold     = options.smallRowThreshold;
             this._groupByThreshold = options.smallRowThreshold;
         } else {
             this._filterThreshold  = Number.isInteger(options.filterThreshold)  ? options.filterThreshold  : 15_000;
-            this._groupByThreshold = Number.isInteger(options.groupByThreshold) ? options.groupByThreshold : 2_000;
+            this._mapThreshold     = Number.isInteger(options.mapThreshold)     ? options.mapThreshold     : 15_000;
+            this._groupByThreshold = Number.isInteger(options.groupByThreshold) ? options.groupByThreshold : 30_000;
         }
     }
 
@@ -121,12 +138,65 @@ class DataEngine {
         return { type: 'array', value: out };
     }
 
+    _queryMap(op, options) {
+        const windowed = applyWindow(this._data, options);
+        if (windowed.length <= this._mapThreshold) {
+            return { type: 'array', value: windowed.map((row) => {
+                const out = { ...row };
+                for (const t of op.transforms) out[t.field] = evalMapExpr(row, t.expr);
+                return out;
+            })};
+        }
+        let cols;
+        this._engine.mapRef([op], options, (ref) => { cols = ref; });
+        return { type: 'array', value: windowed.map((row, i) => {
+            const out = { ...row };
+            for (const t of op.transforms) out[t.field] = cols[t.field][i];
+            return out;
+        })};
+    }
+
+    _queryFilterMap(filterOp, mapOp, options) {
+        const start = (options && Number.isInteger(options.offset)) ? Math.max(0, options.offset) : 0;
+        const windowed = applyWindow(this._data, options);
+        if (windowed.length <= this._filterThreshold) {
+            const filtered = windowed.filter((r) => evalConditions(r, filterOp.conditions, filterOp.logic));
+            return { type: 'array', value: filtered.map((row) => {
+                const out = { ...row };
+                for (const t of mapOp.transforms) out[t.field] = evalMapExpr(row, t.expr);
+                return out;
+            })};
+        }
+        const idx = this._engine.filterIndices([filterOp], options);
+        const m = idx.length;
+        if (m === 0) return { type: 'array', value: [] };
+        let cols;
+        this._engine.mapRef([mapOp], options, (ref) => { cols = ref; });
+        const rows = new Array(m);
+        for (let i = 0; i < m; i++) {
+            const ri = idx[i];
+            const ci = ri - start;
+            const out = { ...this._data[ri] };
+            for (const t of mapOp.transforms) out[t.field] = cols[t.field][ci];
+            rows[i] = out;
+        }
+        return { type: 'array', value: rows };
+    }
+
     query(operations, options) {
         if (operations.length === 1 && operations[0].op === 'filter') {
             return this._queryFilter(operations[0], options);
         }
+        if (operations.length === 1 && operations[0].op === 'map') {
+            return this._queryMap(operations[0], options);
+        }
         if (operations.length === 1 && operations[0].op === 'groupBy' && (!operations[0].aggregate || operations[0].aggregate.length === 0)) {
             return this._queryGroupByNoAgg(operations[0], options);
+        }
+        if (operations.length === 2 &&
+            operations[0].op === 'filter' &&
+            operations[1].op === 'map') {
+            return this._queryFilterMap(operations[0], operations[1], options);
         }
 
         const prepared = this._getPrepared(operations);

@@ -141,6 +141,12 @@ function jsPipeline(data) {
   return groups;
 }
 
+function jsFilterMap(data) {
+  return data
+    .filter((r) => r.age >= 18)
+    .map((r) => ({ ...r, bonus: r.salary * 0.1 }));
+}
+
 // ─── columnar JS reference functions (apples-to-apples vs zero-copy WASM) ────
 // These produce the same output *shape* as their WASM counterparts so the
 // comparison is fair: typed arrays out vs typed arrays out.
@@ -336,6 +342,13 @@ function run() {
       bench("pipeline (filter → groupBy + avg)", [
         () => jsPipeline(data),
         () => engine.query(pipelineOps),
+      ]),
+    );
+
+    rows.push(
+      bench("pipeline (filter → map + bonus)", [
+        () => jsFilterMap(data),
+        () => engine.query([...filterOps, ...mapOps]),
       ]),
     );
 

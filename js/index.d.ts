@@ -86,6 +86,7 @@ export interface MapRefView {
 export interface DataEngineOptions {
   smallRowThreshold?: number;
   filterThreshold?: number;
+  mapThreshold?: number;
   groupByThreshold?: number;
 }
 

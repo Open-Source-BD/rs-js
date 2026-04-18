@@ -228,6 +228,55 @@ describe('query — map', () => {
     });
 });
 
+describe('query — filter → map pipeline', () => {
+    test('filters rows then adds computed field — output same as chained JS', () => {
+        const e = new DataEngine(users);
+        const r = e.query([
+            { op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] },
+            { op: 'map', transforms: [{ field: 'bonus', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.1 } } }] },
+        ]);
+        expect(r.type).toBe('array');
+        // active=true: Alice, Carol only
+        expect(r.value.length).toBe(2);
+        expect(r.value.map(u => u.name)).toEqual(['Alice', 'Carol']);
+        expect(r.value[0].bonus).toBeCloseTo(9500);   // Alice 95000 * 0.1
+        expect(r.value[1].bonus).toBeCloseTo(12000);  // Carol 120000 * 0.1
+        // originals preserved
+        expect(r.value[0].salary).toBe(95000);
+        expect(r.value[0].name).toBe('Alice');
+        e.free();
+    });
+
+    test('windowing applies correctly to filter→map', () => {
+        const e = new DataEngine(users);
+        const r = e.query(
+            [
+                { op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 28 }] },
+                { op: 'map', transforms: [{ field: 'tax', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.2 } } }] },
+            ],
+            { offset: 0, limit: 2 }
+        );
+        expect(r.type).toBe('array');
+        expect(r.value.length).toBeLessThanOrEqual(2);
+        for (const row of r.value) {
+            expect(row.age).toBeGreaterThanOrEqual(28);
+            expect(row.tax).toBeCloseTo(row.salary * 0.2);
+        }
+        e.free();
+    });
+
+    test('zero-result filter → map returns empty array', () => {
+        const e = new DataEngine(users);
+        const r = e.query([
+            { op: 'filter', conditions: [{ field: 'salary', operator: 'gt', value: 999999 }] },
+            { op: 'map', transforms: [{ field: 'bonus', expr: { type: 'literal', value: 1 } }] },
+        ]);
+        expect(r.type).toBe('array');
+        expect(r.value).toEqual([]);
+        e.free();
+    });
+});
+
 describe('query — reduce', () => {
     test('sum — totals all values', () => {
         const e = new DataEngine(users);

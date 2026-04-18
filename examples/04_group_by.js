@@ -2,91 +2,102 @@
 // Requires: wasm-pack build --release --target nodejs --out-dir pkg-node
 // Run:      node examples/04_group_by.js
 
-const { process } = require('../js/index.node.cjs');
+const { DataEngine } = require('../js/index.node.cjs');
 const { users, orders, events } = require('./data.js');
 
-async function main() {
-    // --- 1. Group users by country (no aggregates) ---
-    // Returns: { type: 'array', value: [{ _group, _count, country, rows }, ...] }
-    const byCountry = await process(users, [
-        { op: 'groupBy', field: 'country' }
-    ]);
-    console.log('Users by country:');
-    byCountry.value.forEach(g => {
-        const names = g.rows.map(u => u.name).join(', ');
-        console.log(`  ${g.country} (${g._count}): ${names}`);
-    });
+const userEngine  = new DataEngine(users);
+const orderEngine = new DataEngine(orders);
+const eventEngine = new DataEngine(events);
 
-    // --- 2. Group by department with salary aggregates ---
-    // Returns: { type: 'object', value: { engineering: { _count, avg_salary, max_salary }, ... } }
-    const deptStats = await process(users, [
-        {
-            op: 'groupBy',
-            field: 'department',
-            aggregate: [
-                { field: 'salary', reducer: 'avg', alias: 'avg_salary' },
-                { field: 'salary', reducer: 'max', alias: 'max_salary' },
-                { field: 'salary', reducer: 'sum', alias: 'total_payroll' },
-            ]
-        }
-    ]);
-    console.log('\nDepartment salary stats:');
-    Object.entries(deptStats.value).forEach(([dept, stats]) => {
-        console.log(`  ${dept}:`);
-        console.log(`    headcount:     ${stats._count}`);
-        console.log(`    avg salary:    $${Number(stats.avg_salary).toLocaleString()}`);
-        console.log(`    max salary:    $${Number(stats.max_salary).toLocaleString()}`);
-        console.log(`    total payroll: $${Number(stats.total_payroll).toLocaleString()}`);
-    });
+// --- 1. Group users by country (no aggregates) ---
+// Returns: { type: 'array', value: [{ _group, _count, country, rows }, ...] }
+const byCountry = userEngine.query([
+    { op: 'groupBy', field: 'country' }
+]);
+console.log('Users by country:');
+byCountry.value.forEach(g => {
+    const names = g.rows.map(u => u.name).join(', ');
+    console.log(`  ${g.country} (${g._count}): ${names}`);
+});
 
-    // --- 3. Group orders by status with revenue sum ---
-    const orderStats = await process(orders, [
-        {
-            op: 'groupBy',
-            field: 'status',
-            aggregate: [
-                { field: 'amount', reducer: 'sum', alias: 'total_amount' },
-                { field: 'amount', reducer: 'avg', alias: 'avg_amount'   },
-            ]
-        }
-    ]);
-    console.log('\nOrder stats by status:');
-    Object.entries(orderStats.value).forEach(([status, stats]) => {
-        console.log(`  ${status}: ${stats._count} orders, total $${Number(stats.total_amount).toFixed(2)}, avg $${Number(stats.avg_amount).toFixed(2)}`);
-    });
+// --- 2. Group by department with salary aggregates ---
+// Returns: { type: 'object', value: { engineering: { _count, avg_salary, max_salary }, ... } }
+const deptStats = userEngine.query([
+    {
+        op: 'groupBy',
+        field: 'department',
+        aggregate: [
+            { field: 'salary', reducer: 'avg', alias: 'avg_salary'    },
+            { field: 'salary', reducer: 'max', alias: 'max_salary'    },
+            { field: 'salary', reducer: 'sum', alias: 'total_payroll' },
+        ]
+    }
+]);
+console.log('\nDepartment salary stats:');
+Object.entries(deptStats.value).forEach(([dept, stats]) => {
+    console.log(`  ${dept}:`);
+    console.log(`    headcount:     ${stats._count}`);
+    console.log(`    avg salary:    $${Number(stats.avg_salary).toLocaleString()}`);
+    console.log(`    max salary:    $${Number(stats.max_salary).toLocaleString()}`);
+    console.log(`    total payroll: $${Number(stats.total_payroll).toLocaleString()}`);
+});
 
-    // --- 4. Group events by type (count only) ---
-    const eventGroups = await process(events, [
-        { op: 'groupBy', field: 'type' }
-    ]);
-    console.log('\nEvent type breakdown:');
-    eventGroups.value.forEach(g => {
-        console.log(`  ${g.type}: ${g._count}`);
-    });
+// --- 3. Group orders by status with revenue sum ---
+const orderStats = orderEngine.query([
+    {
+        op: 'groupBy',
+        field: 'status',
+        aggregate: [
+            { field: 'amount', reducer: 'sum', alias: 'total_amount' },
+            { field: 'amount', reducer: 'avg', alias: 'avg_amount'   },
+        ]
+    }
+]);
+console.log('\nOrder stats by status:');
+Object.entries(orderStats.value).forEach(([status, stats]) => {
+    console.log(`  ${status}: ${stats._count} orders, total $${Number(stats.total_amount).toFixed(2)}, avg $${Number(stats.avg_amount).toFixed(2)}`);
+});
 
-    // --- 5. Multi-field group: country + department ---
-    const crossGroup = await process(users, [
-        {
-            op: 'groupBy',
-            field: ['country', 'department'],
-            aggregate: [{ field: 'salary', reducer: 'avg', alias: 'avg_salary' }]
-        }
-    ]);
-    console.log('\nCross group (country × department):');
-    Object.entries(crossGroup.value).forEach(([key, stats]) => {
-        const [country, dept] = key.split('||');
-        console.log(`  ${country} / ${dept}: ${stats._count} people, avg $${Number(stats.avg_salary).toLocaleString()}`);
-    });
+// --- 4. Group events by type (count only) ---
+const eventGroups = eventEngine.query([
+    { op: 'groupBy', field: 'type' }
+]);
+console.log('\nEvent type breakdown:');
+eventGroups.value.forEach(g => {
+    console.log(`  ${g.type}: ${g._count}`);
+});
 
-    // --- 6. Filter first, then group: active users by country ---
-    const activeByCountry = await process(users, [
-        { op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] },
-        { op: 'groupBy', field: 'country' }
-    ]);
-    console.log('\nActive users by country:');
-    activeByCountry.value.forEach(g => {
-        console.log(`  ${g.country}: ${g._count} active users`);
-    });
-}
+// --- 5. Multi-field group: country + department ---
+const crossGroup = userEngine.query([
+    {
+        op: 'groupBy',
+        field: ['country', 'department'],
+        aggregate: [{ field: 'salary', reducer: 'avg', alias: 'avg_salary' }]
+    }
+]);
+console.log('\nCross group (country × department):');
+Object.entries(crossGroup.value).forEach(([key, stats]) => {
+    const [country, dept] = key.split('||');
+    console.log(`  ${country} / ${dept}: ${stats._count} people, avg $${Number(stats.avg_salary).toLocaleString()}`);
+});
 
-main().catch(console.error);
+// --- 6. Filter first, then group: active users by country ---
+const activeByCountry = userEngine.query([
+    { op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] },
+    { op: 'groupBy', field: 'country' }
+]);
+console.log('\nActive users by country:');
+activeByCountry.value.forEach(g => {
+    console.log(`  ${g.country}: ${g._count} active users`);
+});
+
+// --- 7. Zero-copy group indices (groupByIndices) — raw index buckets, no row objects ---
+console.log('\nDepartment buckets (zero-copy indices):');
+const idx = userEngine.groupByIndices('department');
+Object.entries(idx).forEach(([dept, ids]) => {
+    console.log(`  ${dept}: ${ids.length} users (indices: ${Array.from(ids).join(', ')})`);
+});
+
+userEngine.free();
+orderEngine.free();
+eventEngine.free();
