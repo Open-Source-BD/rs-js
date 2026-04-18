@@ -37,8 +37,8 @@ pkg-web/              generated WASM (web target) — do not hand-edit
 **Core class:** `RsJs` (not `DataEngine` — that is the internal WASM class)
 
 ```js
-const { RsJs } = require('rs-js');          // Node.js CJS
-import { createRsJs } from 'rs-js';         // Browser ESM (async)
+const { RsJs } = require('@shaon07/rs-js');          // Node.js CJS
+import { createRsJs } from '@shaon07/rs-js';         // Browser ESM (async)
 
 const engine = new RsJs(data, options?);
 engine.query(operations, options?)           // → PipelineResult
@@ -75,6 +75,7 @@ node benchmark.js                                    # performance benchmark
 ## Coding Conventions
 
 **Rust:**
+
 - Always use `Serializer::json_compatible()` when returning `JsValue` — default emits `BigInt` for large integers
 - Prefer `ColumnStore` fast paths for numeric ops; add fallback in `engine.rs` only if columnar path is impossible
 - `ReduceOp` derives `Clone` — required by `group_by.rs` aggregate loop
@@ -82,6 +83,7 @@ node benchmark.js                                    # performance benchmark
 - `Col::F64` uses `f64::NAN` for null; `Col::Bool` uses `255` for null
 
 **JavaScript:**
+
 - `js/index.node.cjs` and `js/index.js` must stay in sync — same logic, different module format
 - Per-op thresholds: `_filterThreshold=15k`, `_mapThreshold=MAX_SAFE_INTEGER`, `_groupByThreshold=30k`
 - `_mapThreshold=MAX_SAFE_INTEGER` is intentional — mapRef+merge overhead exceeds JS spread at all sizes
@@ -89,6 +91,7 @@ node benchmark.js                                    # performance benchmark
 - `compileExpr` eliminates per-row recursive dispatch; fast path for `field OP literal` pattern
 
 **TypeScript:**
+
 - `index.d.ts` must match all exported methods with correct signatures
 - `PipelineResult` is a discriminated union — `type` field is the discriminant
 - Zero-copy API types: `FilterMapRef`, `FilterSelectionRef`, `MapRefView`

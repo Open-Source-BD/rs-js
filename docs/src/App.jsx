@@ -25,12 +25,12 @@ function MenuIcon() {
 }
 
 const INSTALL_CODE = `# Node.js (CommonJS)
-const { RsJs } = require('rs-js');
+const { RsJs } = require('@shaon07/rs-js');
 
 # Browser / ESM
-import { createRsJs } from 'rs-js';`;
+import { createRsJs } from '@shaon07/rs-js';`;
 
-const QUICK_START_CODE = `const { RsJs } = require('rs-js');
+const QUICK_START_CODE = `const { RsJs } = require('@shaon07/rs-js');
 
 // 1. Load your data once
 const engine = new RsJs(data);
@@ -121,7 +121,7 @@ export default function App() {
 
         <div className="flex items-center gap-3">
           <span className="text-xs bg-violet-500/15 text-violet-400 border border-violet-500/30 px-2 py-0.5 rounded font-mono hidden sm:block">
-            v0.1.2
+            v.0.1.4
           </span>
           <a
             href="https://github.com/shaon07/rs-js"
@@ -226,7 +226,7 @@ export default function App() {
                     <span className="text-violet-400">const</span> {"{"}{" "}
                     <span className="text-cyan-300">RsJs</span> {"}"} ={" "}
                     <span className="text-amber-300">require</span>(
-                    <span className="text-green-400">'rs-js'</span>);
+                    <span className="text-green-400">'@shaon07/rs-js'</span>);
                   </div>
                   <div className="mt-2">
                     <span className="text-slate-500"># Browser / ESM</span>
@@ -235,7 +235,7 @@ export default function App() {
                     <span className="text-violet-400">import</span> {"{"}{" "}
                     <span className="text-cyan-300">createRsJs</span> {"}"}{" "}
                     <span className="text-violet-400">from</span>{" "}
-                    <span className="text-green-400">'rs-js'</span>;
+                    <span className="text-green-400">'@shaon07/rs-js'</span>;
                   </div>
                 </div>
               </div>

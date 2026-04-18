@@ -85,7 +85,7 @@ export default function Sidebar({ categories, activeId, search, onSearchChange, 
           <img src="/favicon.svg" alt="rs-js logo" className="w-8 h-8 shrink-0" />
           <div>
             <span className="font-bold text-white font-mono text-sm tracking-tight">rs-js</span>
-            <span className="text-slate-500 text-xs ml-2">v0.1.2</span>
+            <span className="text-slate-500 text-xs ml-2">v.0.1.4</span>
           </div>
         </div>
 
