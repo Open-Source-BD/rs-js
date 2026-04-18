@@ -83,6 +83,20 @@ export interface MapRefView {
   [field: string]: Float64Array | Uint8Array | Uint16Array | StrColumnView | unknown[];
 }
 
+/** Zero-copy callback ref returned by filterMapRef. Valid only inside the callback. */
+export interface FilterMapRef {
+  /** Number of rows that matched the filter. */
+  count: number;
+  /** Absolute row indices (into the original dataset) that matched. */
+  indices: Uint32Array;
+  /**
+   * All original columns gathered to matched rows, plus computed transform columns.
+   * F64 fields → Float64Array; Bool fields → Uint8Array; Str fields → StrColumnView.
+   * Views into WASM memory — do not retain after callback returns.
+   */
+  columns: Record<string, Float64Array | Uint8Array | StrColumnView>;
+}
+
 export interface RsJsOptions {
   smallRowThreshold?: number;
   filterThreshold?: number;
@@ -115,6 +129,17 @@ export declare class RsJs {
     callback: (view: MapRefView) => unknown,
     options?: PipelineOptions,
   ): unknown;
+  /**
+   * Combined filter + map → gathered typed-array columns. ~18x faster than row-object output.
+   * All original columns are gathered to matched rows. Computed transform columns are appended.
+   * Views are zero-copy into WASM memory — valid only inside the callback.
+   */
+  filterMapRef(
+    filterOps: Operation[],
+    mapOps: Operation[],
+    callback: (ref: FilterMapRef) => void,
+    options?: PipelineOptions,
+  ): void;
   /** Returns `{ groupKey: Uint32Array }` of row indices per group. No row serialization. */
   groupByIndices(field: string): Record<string, Uint32Array>;
   len(): number;

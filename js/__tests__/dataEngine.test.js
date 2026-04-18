@@ -711,3 +711,105 @@ describe('groupByIndices', () => {
         e.free();
     });
 });
+
+// ─── filterMapRef ─────────────────────────────────────────────────────────────
+
+describe('filterMapRef', () => {
+    test('count and indices match filtered rows', () => {
+        const e = new RsJs(users);
+        e.filterMapRef(
+            [{ op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] }],
+            [{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.1 } } }] }],
+            (ref) => {
+                expect(ref.count).toBe(2);
+                expect(ref.indices).toBeInstanceOf(Uint32Array);
+                expect(Array.from(ref.indices)).toEqual([0, 2]); // Alice, Carol
+            }
+        );
+        e.free();
+    });
+
+    test('computed arithmetic column correct', () => {
+        const e = new RsJs(users);
+        e.filterMapRef(
+            [{ op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] }],
+            [{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.1 } } }] }],
+            (ref) => {
+                expect(ref.columns.bonus).toBeInstanceOf(Float64Array);
+                expect(Array.from(ref.columns.bonus)).toEqual([9500, 12000]); // Alice, Carol
+            }
+        );
+        e.free();
+    });
+
+    test('original numeric column gathered correctly', () => {
+        const e = new RsJs(users);
+        e.filterMapRef(
+            [{ op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] }],
+            [{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'literal', value: 0 } }] }],
+            (ref) => {
+                expect(ref.columns.salary).toBeInstanceOf(Float64Array);
+                expect(Array.from(ref.columns.salary)).toEqual([95000, 120000]);
+                expect(ref.columns.age).toBeInstanceOf(Float64Array);
+                expect(Array.from(ref.columns.age)).toEqual([28, 35]);
+            }
+        );
+        e.free();
+    });
+
+    test('original bool column gathered correctly', () => {
+        const e = new RsJs(users);
+        e.filterMapRef(
+            [{ op: 'filter', conditions: [{ field: 'age', operator: 'gte', value: 28 }] }],
+            [{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'literal', value: 1 } }] }],
+            (ref) => {
+                expect(ref.columns.active).toBeInstanceOf(Uint8Array);
+                // Alice(active=1), Carol(active=1), Dave(active=0)
+                expect(Array.from(ref.columns.active)).toEqual([1, 1, 0]);
+            }
+        );
+        e.free();
+    });
+
+    test('string column gathered with codes and categories', () => {
+        const e = new RsJs(users);
+        e.filterMapRef(
+            [{ op: 'filter', conditions: [{ field: 'active', operator: 'eq', value: true }] }],
+            [{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'literal', value: 0 } }] }],
+            (ref) => {
+                expect(ref.columns.dept.codes).toBeInstanceOf(Uint16Array);
+                expect(Array.isArray(ref.columns.dept.categories)).toBe(true);
+                // Alice=eng(0), Carol=sales(1)
+                expect(ref.columns.dept.categories).toEqual(['eng', 'sales']);
+                expect(Array.from(ref.columns.dept.codes)).toEqual([0, 1]);
+            }
+        );
+        e.free();
+    });
+
+    test('zero matches — count 0, empty indices', () => {
+        const e = new RsJs(users);
+        e.filterMapRef(
+            [{ op: 'filter', conditions: [{ field: 'age', operator: 'gt', value: 100 }] }],
+            [{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'literal', value: 0 } }] }],
+            (ref) => {
+                expect(ref.count).toBe(0);
+                expect(ref.indices.length).toBe(0);
+            }
+        );
+        e.free();
+    });
+
+    test('no filter ops — all rows returned', () => {
+        const e = new RsJs(users);
+        e.filterMapRef(
+            [],
+            [{ op: 'map', transforms: [{ field: 'bonus', expr: { type: 'arithmetic', op: '*', left: { type: 'field', name: 'salary' }, right: { type: 'literal', value: 0.1 } } }] }],
+            (ref) => {
+                expect(ref.count).toBe(4);
+                expect(Array.from(ref.columns.bonus)).toEqual([9500, 0, 12000, 8000]);
+            }
+        );
+        e.free();
+    });
+});

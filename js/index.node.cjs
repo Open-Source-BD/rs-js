@@ -40,6 +40,40 @@ function evalMapExpr(row, expr) {
     return null;
 }
 
+// Compile expr tree to a closure — eliminates per-row recursive dispatch.
+function compileExpr(expr) {
+    if (expr.type === 'literal') { const v = expr.value; return () => v; }
+    if (expr.type === 'field')   { const n = expr.name;  return (row) => row[n] ?? null; }
+    if (expr.type === 'template') {
+        const tpl = expr.template;
+        return (row) => tpl.replace(/\{(\w+)\}/g, (_, k) => row[k] ?? '');
+    }
+    if (expr.type === 'arithmetic') {
+        // fast path: field OP literal — single property access, no sub-closures
+        if (expr.left.type === 'field' && expr.right.type === 'literal') {
+            const n = expr.left.name, v = expr.right.value;
+            if (expr.op === '+') return (row) => row[n] + v;
+            if (expr.op === '-') return (row) => row[n] - v;
+            if (expr.op === '*') return (row) => row[n] * v;
+            if (expr.op === '/') return v === 0 ? () => null : (row) => row[n] / v;
+        }
+        // fast path: literal OP field
+        if (expr.left.type === 'literal' && expr.right.type === 'field') {
+            const v = expr.left.value, n = expr.right.name;
+            if (expr.op === '+') return (row) => v + row[n];
+            if (expr.op === '-') return (row) => v - row[n];
+            if (expr.op === '*') return (row) => v * row[n];
+            if (expr.op === '/') return (row) => { const r = row[n]; return r === 0 ? null : v / r; };
+        }
+        const L = compileExpr(expr.left), R = compileExpr(expr.right);
+        if (expr.op === '+') return (row) => L(row) + R(row);
+        if (expr.op === '-') return (row) => L(row) - R(row);
+        if (expr.op === '*') return (row) => L(row) * R(row);
+        if (expr.op === '/') return (row) => { const r = R(row); return r === 0 ? null : L(row) / r; };
+    }
+    return () => null;
+}
+
 function evalCondition(row, cond) {
     const value = row[cond.field];
     switch (cond.operator) {
@@ -78,7 +112,8 @@ class RsJs {
             this._groupByThreshold = options.smallRowThreshold;
         } else {
             this._filterThreshold  = Number.isInteger(options.filterThreshold)  ? options.filterThreshold  : 15_000;
-            this._mapThreshold     = Number.isInteger(options.mapThreshold)     ? options.mapThreshold     : 15_000;
+            // Map always uses JS path for row-object output — mapRef+merge overhead > JS spread at any size.
+            this._mapThreshold     = Number.isInteger(options.mapThreshold)     ? options.mapThreshold     : Number.MAX_SAFE_INTEGER;
             this._groupByThreshold = Number.isInteger(options.groupByThreshold) ? options.groupByThreshold : 30_000;
         }
     }
@@ -103,6 +138,86 @@ class RsJs {
         const m = idx.length;
         const rows = new Array(m);
         for (let i = 0; i < m; i++) rows[i] = this._data[idx[i]];
+        return { type: 'array', value: rows };
+    }
+
+    _queryMap(op, options) {
+        const windowed = applyWindow(this._data, options);
+        const transforms = op.transforms;
+        const tLen = transforms.length;
+        // Always use JS path: mapRef+merge overhead exceeds JS spread cost at all sizes.
+        if (windowed.length <= this._mapThreshold) {
+            if (tLen === 1) {
+                const { field, expr } = transforms[0];
+                const fn = compileExpr(expr);
+                return { type: 'array', value: windowed.map((row) => ({ ...row, [field]: fn(row) })) };
+            }
+            const fns = transforms.map((t) => compileExpr(t.expr));
+            return { type: 'array', value: windowed.map((row) => {
+                const out = { ...row };
+                for (let j = 0; j < tLen; j++) out[transforms[j].field] = fns[j](row);
+                return out;
+            })};
+        }
+        // WASM path (only reachable if mapThreshold overridden very low): pre-extract column arrays.
+        let cols;
+        this._engine.mapRef([op], options, (ref) => { cols = ref; });
+        const fields = transforms.map((t) => t.field);
+        const colArrays = fields.map((f) => cols[f]);
+        const len = windowed.length;
+        const rows = new Array(len);
+        if (tLen === 1) {
+            const field = fields[0], col = colArrays[0];
+            for (let i = 0; i < len; i++) rows[i] = { ...windowed[i], [field]: col[i] };
+        } else {
+            for (let i = 0; i < len; i++) {
+                const out = { ...windowed[i] };
+                for (let j = 0; j < tLen; j++) out[fields[j]] = colArrays[j][i];
+                rows[i] = out;
+            }
+        }
+        return { type: 'array', value: rows };
+    }
+
+    _queryFilterMap(filterOp, mapOp, options) {
+        const windowed = applyWindow(this._data, options);
+        const transforms = mapOp.transforms;
+        const tLen = transforms.length;
+        if (windowed.length <= this._filterThreshold) {
+            const filtered = windowed.filter((r) => evalConditions(r, filterOp.conditions, filterOp.logic));
+            if (tLen === 1) {
+                const { field, expr } = transforms[0];
+                const fn = compileExpr(expr);
+                return { type: 'array', value: filtered.map((row) => ({ ...row, [field]: fn(row) })) };
+            }
+            const fns = transforms.map((t) => compileExpr(t.expr));
+            return { type: 'array', value: filtered.map((row) => {
+                const out = { ...row };
+                for (let j = 0; j < tLen; j++) out[transforms[j].field] = fns[j](row);
+                return out;
+            })};
+        }
+        // WASM filterIndices + compiled map exprs — drops mapRef entirely.
+        const idx = this._engine.filterIndices([filterOp], options);
+        const m = idx.length;
+        if (m === 0) return { type: 'array', value: [] };
+        const rows = new Array(m);
+        if (tLen === 1) {
+            const { field, expr } = transforms[0];
+            const fn = compileExpr(expr);
+            for (let i = 0; i < m; i++) {
+                const row = this._data[idx[i]];
+                rows[i] = { ...row, [field]: fn(row) };
+            }
+        } else {
+            const fns = transforms.map((t) => compileExpr(t.expr));
+            for (let i = 0; i < m; i++) {
+                const row = this._data[idx[i]];
+                const out = { ...row };
+                for (let j = 0; j < tLen; j++) out[transforms[j].field] = fns[j](row);
+                rows[i] = out;
+            }
+        }
         return { type: 'array', value: rows };
     }
 
@@ -136,51 +251,6 @@ class RsJs {
             out.push({ _group: key, _count: rows.length, [field]: sample[field], rows });
         }
         return { type: 'array', value: out };
-    }
-
-    _queryMap(op, options) {
-        const windowed = applyWindow(this._data, options);
-        if (windowed.length <= this._mapThreshold) {
-            return { type: 'array', value: windowed.map((row) => {
-                const out = { ...row };
-                for (const t of op.transforms) out[t.field] = evalMapExpr(row, t.expr);
-                return out;
-            })};
-        }
-        let cols;
-        this._engine.mapRef([op], options, (ref) => { cols = ref; });
-        return { type: 'array', value: windowed.map((row, i) => {
-            const out = { ...row };
-            for (const t of op.transforms) out[t.field] = cols[t.field][i];
-            return out;
-        })};
-    }
-
-    _queryFilterMap(filterOp, mapOp, options) {
-        const start = (options && Number.isInteger(options.offset)) ? Math.max(0, options.offset) : 0;
-        const windowed = applyWindow(this._data, options);
-        if (windowed.length <= this._filterThreshold) {
-            const filtered = windowed.filter((r) => evalConditions(r, filterOp.conditions, filterOp.logic));
-            return { type: 'array', value: filtered.map((row) => {
-                const out = { ...row };
-                for (const t of mapOp.transforms) out[t.field] = evalMapExpr(row, t.expr);
-                return out;
-            })};
-        }
-        const idx = this._engine.filterIndices([filterOp], options);
-        const m = idx.length;
-        if (m === 0) return { type: 'array', value: [] };
-        let cols;
-        this._engine.mapRef([mapOp], options, (ref) => { cols = ref; });
-        const rows = new Array(m);
-        for (let i = 0; i < m; i++) {
-            const ri = idx[i];
-            const ci = ri - start;
-            const out = { ...this._data[ri] };
-            for (const t of mapOp.transforms) out[t.field] = cols[t.field][ci];
-            rows[i] = out;
-        }
-        return { type: 'array', value: rows };
     }
 
     query(operations, options) {
@@ -217,11 +287,12 @@ class RsJs {
         return this._engine.is_empty();
     }
 
-    // Exposed for advanced users
-    filterIndices(ops, opts) { return this._engine.filterIndices(ops, opts); }
-    filterViewRef(ops, callback, opts) { return this._engine.filterViewRef(ops, opts, callback); }
-    mapRef(ops, callback, opts) { return this._engine.mapRef(ops, opts, callback); }
-    groupByIndices(field) { return this._engine.groupByIndices(field); }
+    // Low-level zero-copy APIs
+    filterIndices(ops, opts)                         { return this._engine.filterIndices(ops, opts); }
+    filterViewRef(ops, callback, opts)               { return this._engine.filterViewRef(ops, opts, callback); }
+    filterMapRef(filterOps, mapOps, callback, opts)  { return this._engine.filterMapRef(filterOps, mapOps, opts, callback); }
+    mapRef(ops, callback, opts)                      { return this._engine.mapRef(ops, opts, callback); }
+    groupByIndices(field)                            { return this._engine.groupByIndices(field); }
 }
 
 module.exports = { RsJs };

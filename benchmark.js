@@ -353,6 +353,13 @@ function run() {
     );
 
     rows.push(
+      bench("filterMapRef  (filter→map columnar)", [
+        () => jsFilterMap(data),
+        () => rsjs.filterMapRef(filterOps, mapOps, (ref) => ref.count),
+      ]),
+    );
+
+    rows.push(
       bench("filterViewRef (zero-copy)", [
         () => jsColumnarFilter(data),
         () => rsjs.filterViewRef(filterOps, (ref) => ref),
