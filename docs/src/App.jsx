@@ -124,7 +124,7 @@ export default function App() {
             v.0.1.4
           </span>
           <a
-            href="https://github.com/shaon07/rs-js"
+            href="https://github.com/Open-Source-BD/rs-js"
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors"
@@ -279,7 +279,7 @@ export default function App() {
             <p className="text-slate-600 text-sm">
               rs-js — Rust/WASM data engine ·{" "}
               <a
-                href="https://github.com/shaon07/rs-js"
+                href="https://github.com/Open-Source-BD/rs-js"
                 target="_blank"
                 rel="noreferrer"
                 className="hover:text-slate-400 transition-colors"

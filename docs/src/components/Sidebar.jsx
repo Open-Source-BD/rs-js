@@ -154,7 +154,7 @@ export default function Sidebar({ categories, activeId, search, onSearchChange, 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-slate-800 shrink-0">
           <a
-            href="https://github.com/shaon07/rs-js"
+            href="https://github.com/Open-Source-BD/rs-js"
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors"
