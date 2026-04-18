@@ -1,8 +1,9 @@
 {
-  "name": "rs-js",
-  "version": "0.1.0",
-  "description": "High-performance data processing powered by Rust + WebAssembly. Filter, map, reduce, groupBy, count, find — on 100k–1M records with a simple JS API.",
+  "name": "@shaon07/rs-js",
+  "version": "0.1.2",
+  "description": "High-performance data processing engine for JS/TS. Features WASM SIMD-accelerated filtering, mapping, and columnar-storage for 10x faster processing of large datasets.",
   "main": "js/index.node.cjs",
+  "module": "js/index.js",
   "types": "js/index.d.ts",
   "exports": {
     ".": {
@@ -12,10 +13,11 @@
     }
   },
   "scripts": {
-    "build": "wasm-pack build --release --target nodejs  --out-dir pkg-node",
+    "build": "wasm-pack build --release --target nodejs --out-dir pkg-node",
     "build:web": "wasm-pack build --release --target web --out-dir pkg-web",
     "build:bundler": "wasm-pack build --release --target bundler --out-dir pkg",
     "build:all": "npm run build && npm run build:web && npm run build:bundler",
+    "prepublishOnly": "npm run build:all",
     "test:rust": "cargo test",
     "test": "jest",
     "benchmark": "node benchmark.js"
@@ -24,17 +26,23 @@
     "js/",
     "pkg-node/",
     "pkg/",
-    "pkg-web/"
+    "pkg-web/",
+    "README.md",
+    "LICENSE"
   ],
   "keywords": [
-    "wasm",
     "rust",
+    "wasm",
+    "javascript",
     "data-processing",
-    "filter",
-    "reduce",
-    "groupby",
-    "performance"
+    "simd",
+    "performance",
+    "webassembly",
+    "columnar-storage",
+    "big-data",
+    "typescript"
   ],
+  "author": "MD Shamirul Islam",
   "license": "MIT",
   "sideEffects": false,
   "devDependencies": {
