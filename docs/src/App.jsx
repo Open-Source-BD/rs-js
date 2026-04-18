@@ -1,15 +1,25 @@
-import { useEffect, useState } from 'react';
-import CodeBlock from './components/CodeBlock.jsx';
-import MethodCard from './components/MethodCard.jsx';
-import PerformanceBenchmark from './components/PerformanceBenchmark.jsx';
-import Sidebar from './components/Sidebar.jsx';
-import TypesSection from './components/TypesSection.jsx';
-import { categories } from './data/api.js';
+import { useEffect, useState } from "react";
+import CodeBlock from "./components/CodeBlock.jsx";
+import MethodCard from "./components/MethodCard.jsx";
+import PerformanceBenchmark from "./components/PerformanceBenchmark.jsx";
+import Sidebar from "./components/Sidebar.jsx";
+import TypesSection from "./components/TypesSection.jsx";
+import { categories } from "./data/api.js";
 
 function MenuIcon() {
   return (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+    <svg
+      className="w-5 h-5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 6h16M4 12h16M4 18h16"
+      />
     </svg>
   );
 }
@@ -55,12 +65,12 @@ engine.filterMapRef(
 engine.free();`;
 
 export default function App() {
-  const [search, setSearch] = useState('');
-  const [activeId, setActiveId] = useState('');
+  const [search, setSearch] = useState("");
+  const [activeId, setActiveId] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const sections = document.querySelectorAll('.method-section');
+    const sections = document.querySelectorAll(".method-section");
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -70,7 +80,7 @@ export default function App() {
           }
         }
       },
-      { rootMargin: '-10% 0px -75% 0px', threshold: 0 }
+      { rootMargin: "-10% 0px -75% 0px", threshold: 0 },
     );
     sections.forEach((s) => observer.observe(s));
     return () => observer.disconnect();
@@ -84,7 +94,7 @@ export default function App() {
             (m) =>
               m.name.toLowerCase().includes(search.toLowerCase()) ||
               m.description.toLowerCase().includes(search.toLowerCase()) ||
-              m.signature.toLowerCase().includes(search.toLowerCase())
+              m.signature.toLowerCase().includes(search.toLowerCase()),
           ),
         }))
         .filter((cat) => cat.methods.length > 0)
@@ -102,7 +112,9 @@ export default function App() {
         </button>
 
         <div className="flex items-center gap-2 lg:ml-72">
-          <span className="text-xs text-slate-500 hidden sm:block">High-Performance WASM Data Engine for JavaScript</span>
+          <span className="text-xs text-slate-500 hidden sm:block">
+            High-Performance WASM Data Engine for JavaScript
+          </span>
         </div>
 
         <div className="flex-1" />
@@ -138,44 +150,53 @@ export default function App() {
       {/* Main content */}
       <main className="lg:pl-72 pt-14">
         <div className="max-w-4xl mx-auto px-5 sm:px-8 py-14">
-
           {/* Hero */}
           <div className="mb-16">
             <div className="mb-6">
-              <img src="/logo.svg" alt="rs-js — WASM Data Engine" className="h-12" />
+              <img
+                src="/logo.svg"
+                alt="rs-js — WASM Data Engine"
+                className="h-12"
+              />
             </div>
             <p className="text-lg text-slate-300 mb-3 leading-relaxed max-w-2xl">
-              High-performance Rust/WASM data engine for JavaScript.
-              Deserialize once, query many times — no re-serialization overhead.
+              High-performance Rust/WASM data engine for JavaScript. Deserialize
+              once, query many times — no re-serialization overhead.
             </p>
             <p className="text-slate-500 mb-8 max-w-2xl">
-              Up to <span className="text-violet-400 font-semibold">45× faster</span> than native JS for columnar analytics.
-              Zero-copy typed-array APIs bypass V8's object-creation bottleneck entirely.
+              Up to{" "}
+              <span className="text-violet-400 font-semibold">45× faster</span>{" "}
+              than native JS for columnar analytics. Zero-copy typed-array APIs
+              bypass V8's object-creation bottleneck entirely.
             </p>
 
             {/* Performance badges */}
             <div className="flex flex-wrap gap-3 mb-8">
               {[
-                { label: 'filterMapRef', value: '5–18×', color: 'violet' },
-                { label: 'mapRef projection', value: '29×', color: 'cyan' },
-                { label: 'groupBy + agg', value: '6×', color: 'emerald' },
-                { label: 'reduce / count', value: '4–8×', color: 'amber' },
+                { label: "filterMapRef", value: "5–18×", color: "violet" },
+                { label: "mapRef projection", value: "29×", color: "cyan" },
+                { label: "groupBy + agg", value: "6×", color: "emerald" },
+                { label: "reduce / count", value: "4–8×", color: "amber" },
               ].map(({ label, value, color }) => (
                 <div
                   key={label}
                   className={`flex items-center gap-2 border rounded-lg px-3 py-2
-                    ${color === 'violet' ? 'border-violet-500/30 bg-violet-500/5' : ''}
-                    ${color === 'cyan'   ? 'border-cyan-500/30   bg-cyan-500/5'   : ''}
-                    ${color === 'emerald'? 'border-emerald-500/30 bg-emerald-500/5': ''}
-                    ${color === 'amber'  ? 'border-amber-500/30  bg-amber-500/5'  : ''}
+                    ${color === "violet" ? "border-violet-500/30 bg-violet-500/5" : ""}
+                    ${color === "cyan" ? "border-cyan-500/30   bg-cyan-500/5" : ""}
+                    ${color === "emerald" ? "border-emerald-500/30 bg-emerald-500/5" : ""}
+                    ${color === "amber" ? "border-amber-500/30  bg-amber-500/5" : ""}
                   `}
                 >
-                  <span className={`text-lg font-bold font-mono
-                    ${color === 'violet'  ? 'text-violet-400' : ''}
-                    ${color === 'cyan'    ? 'text-cyan-400'   : ''}
-                    ${color === 'emerald' ? 'text-emerald-400': ''}
-                    ${color === 'amber'   ? 'text-amber-400'  : ''}
-                  `}>{value}</span>
+                  <span
+                    className={`text-lg font-bold font-mono
+                    ${color === "violet" ? "text-violet-400" : ""}
+                    ${color === "cyan" ? "text-cyan-400" : ""}
+                    ${color === "emerald" ? "text-emerald-400" : ""}
+                    ${color === "amber" ? "text-amber-400" : ""}
+                  `}
+                  >
+                    {value}
+                  </span>
                   <span className="text-slate-400 text-xs">{label}</span>
                 </div>
               ))}
@@ -183,20 +204,48 @@ export default function App() {
 
             {/* Install */}
             <div className="mb-6">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">Install</h2>
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">
+                Install
+              </h2>
               <div className="rounded-lg overflow-hidden border border-slate-700/60">
                 <div className="bg-slate-900/80 px-4 py-3 text-sm font-mono text-slate-300 space-y-1">
-                  <div><span className="text-slate-500"># Node.js (CommonJS)</span></div>
-                  <div><span className="text-violet-400">const</span> {'{'} <span className="text-cyan-300">RsJs</span> {'}'} = <span className="text-amber-300">require</span>(<span className="text-green-400">'rs-js'</span>);</div>
-                  <div className="mt-2"><span className="text-slate-500"># Browser / ESM</span></div>
-                  <div><span className="text-violet-400">import</span> {'{'} <span className="text-cyan-300">createRsJs</span> {'}'} <span className="text-violet-400">from</span> <span className="text-green-400">'rs-js'</span>;</div>
+                  <div>
+                    <span className="text-slate-500">#Install</span>
+                  </div>
+                  <div>
+                    <span className="text-violet-400">
+                      npm i @shaon07/rs-js
+                    </span>
+                  </div>
+                  <br />
+                  <div>
+                    <span className="text-slate-500"># Node.js (CommonJS)</span>
+                  </div>
+
+                  <div>
+                    <span className="text-violet-400">const</span> {"{"}{" "}
+                    <span className="text-cyan-300">RsJs</span> {"}"} ={" "}
+                    <span className="text-amber-300">require</span>(
+                    <span className="text-green-400">'rs-js'</span>);
+                  </div>
+                  <div className="mt-2">
+                    <span className="text-slate-500"># Browser / ESM</span>
+                  </div>
+                  <div>
+                    <span className="text-violet-400">import</span> {"{"}{" "}
+                    <span className="text-cyan-300">createRsJs</span> {"}"}{" "}
+                    <span className="text-violet-400">from</span>{" "}
+                    <span className="text-green-400">'rs-js'</span>;
+                  </div>
                 </div>
               </div>
             </div>
 
             {/* Quick start */}
             <div>
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">Quick Start</h2>
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">
+                Quick Start
+              </h2>
               <CodeBlock code={QUICK_START_CODE} />
             </div>
           </div>
@@ -228,8 +277,13 @@ export default function App() {
           {/* Footer */}
           <footer className="mt-16 pt-8 border-t border-slate-800 text-center">
             <p className="text-slate-600 text-sm">
-              rs-js — Rust/WASM data engine ·{' '}
-              <a href="https://github.com/shaon07/rs-js" target="_blank" rel="noreferrer" className="hover:text-slate-400 transition-colors">
+              rs-js — Rust/WASM data engine ·{" "}
+              <a
+                href="https://github.com/shaon07/rs-js"
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-slate-400 transition-colors"
+              >
                 GitHub
               </a>
             </p>
