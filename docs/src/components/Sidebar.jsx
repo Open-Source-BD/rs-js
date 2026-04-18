@@ -115,6 +115,29 @@ export default function Sidebar({ categories, activeId, search, onSearchChange, 
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-3">
+          {/* Static section links — always shown when not searching */}
+          {!search && (
+            <div className="mb-3 space-y-0.5">
+              {[
+                { id: 'performance', label: 'Performance', icon: '⚡' },
+                { id: 'types',       label: 'Types',       icon: '𝕋' },
+              ].map(({ id, label, icon }) => (
+                <a
+                  key={id}
+                  href={`#${id}`}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-semibold transition-colors ${
+                    activeId === id
+                      ? 'bg-violet-500/15 text-violet-300 border-l-2 border-violet-500 pl-2.5'
+                      : 'text-slate-300 hover:text-slate-100 hover:bg-slate-800/40'
+                  }`}
+                >
+                  <span className="text-xs w-4 text-center">{icon}</span>
+                  {label}
+                </a>
+              ))}
+              <div className="h-px bg-slate-800 my-2" />
+            </div>
+          )}
           {categories.length === 0 ? (
             <p className="text-slate-500 text-sm px-3 py-4 text-center">No results for "{search}"</p>
           ) : (

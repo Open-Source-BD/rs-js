@@ -3,6 +3,8 @@ import { categories } from './data/api.js';
 import Sidebar from './components/Sidebar.jsx';
 import MethodCard from './components/MethodCard.jsx';
 import CodeBlock from './components/CodeBlock.jsx';
+import PerformanceBenchmark from './components/PerformanceBenchmark.jsx';
+import TypesSection from './components/TypesSection.jsx';
 
 function MenuIcon() {
   return (
@@ -204,6 +206,9 @@ export default function App() {
             </div>
           </div>
 
+          {/* Performance section */}
+          {!search && <PerformanceBenchmark />}
+
           {/* Method sections */}
           {filteredCategories.map((category) => (
             <div key={category.id}>
@@ -221,6 +226,9 @@ export default function App() {
               ))}
             </div>
           ))}
+
+          {/* Types section */}
+          {!search && <TypesSection />}
 
           {/* Footer */}
           <footer className="mt-16 pt-8 border-t border-slate-800 text-center">
