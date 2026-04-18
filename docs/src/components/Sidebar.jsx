@@ -81,10 +81,8 @@ export default function Sidebar({ categories, activeId, search, onSearchChange, 
         }`}
       >
         {/* Logo area */}
-        <div className="flex items-center gap-2.5 px-5 h-14 border-b border-slate-800 shrink-0">
-          <div className="w-7 h-7 rounded-md bg-violet-600 flex items-center justify-center">
-            <span className="text-white text-xs font-bold">R</span>
-          </div>
+        <div className="flex items-center gap-2 px-4 h-14 border-b border-slate-800 shrink-0">
+          <img src="/favicon.svg" alt="rs-js logo" className="w-8 h-8 shrink-0" />
           <div>
             <span className="font-bold text-white font-mono text-sm tracking-tight">rs-js</span>
             <span className="text-slate-500 text-xs ml-2">v1.0</span>

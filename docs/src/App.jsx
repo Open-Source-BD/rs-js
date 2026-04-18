@@ -141,20 +141,15 @@ export default function App() {
 
           {/* Hero */}
           <div className="mb-16">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-violet-800 flex items-center justify-center shadow-lg">
-                <span className="text-white font-bold font-mono text-lg">R</span>
-              </div>
-              <h1 className="text-4xl font-bold text-white tracking-tight">
-                rs-js
-              </h1>
+            <div className="mb-6">
+              <img src="/logo.svg" alt="rs-js — WASM Data Engine" className="h-12" />
             </div>
             <p className="text-lg text-slate-300 mb-3 leading-relaxed max-w-2xl">
               High-performance Rust/WASM data engine for JavaScript.
               Deserialize once, query many times — no re-serialization overhead.
             </p>
             <p className="text-slate-500 mb-8 max-w-2xl">
-              Up to <span className="text-violet-400 font-semibold">18× faster</span> than native JS for columnar analytics.
+              Up to <span className="text-violet-400 font-semibold">45× faster</span> than native JS for columnar analytics.
               Zero-copy typed-array APIs bypass V8's object-creation bottleneck entirely.
             </p>
 
