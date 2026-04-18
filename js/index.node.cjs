@@ -28,12 +28,19 @@ function applyWindow(data, options) {
 function evalCondition(row, cond) {
     const value = row[cond.field];
     switch (cond.operator) {
-        case 'eq': return value === cond.value;
-        case 'ne': return value !== cond.value;
-        case 'gt': return value > cond.value;
-        case 'gte': return value >= cond.value;
-        case 'lt': return value < cond.value;
-        case 'lte': return value <= cond.value;
+        case 'eq':         return value === cond.value;
+        case 'ne':         return value !== cond.value;
+        case 'gt':         return value > cond.value;
+        case 'gte':        return value >= cond.value;
+        case 'lt':         return value < cond.value;
+        case 'lte':        return value <= cond.value;
+        case 'contains':   return typeof value === 'string' && typeof cond.value === 'string' && value.includes(cond.value);
+        case 'startsWith': return typeof value === 'string' && typeof cond.value === 'string' && value.startsWith(cond.value);
+        case 'endsWith':   return typeof value === 'string' && typeof cond.value === 'string' && value.endsWith(cond.value);
+        case 'in':         return Array.isArray(cond.value) && cond.value.includes(value);
+        case 'notIn':      return Array.isArray(cond.value) && !cond.value.includes(value);
+        case 'isNull':     return value == null;
+        case 'isNotNull':  return value != null;
         default: return false;
     }
 }
@@ -41,33 +48,6 @@ function evalCondition(row, cond) {
 function evalConditions(row, conditions, logic = 'and') {
     if (logic === 'or') return conditions.some((c) => evalCondition(row, c));
     return conditions.every((c) => evalCondition(row, c));
-}
-
-function evalMapExpr(row, expr) {
-    switch (expr.type) {
-        case 'literal': return expr.value;
-        case 'field': return row[expr.name] ?? null;
-        case 'template': {
-            let out = expr.template;
-            for (const [k, v] of Object.entries(row)) {
-                out = out.replaceAll(`{${k}}`, String(v));
-            }
-            return out;
-        }
-        case 'arithmetic': {
-            const l = Number(evalMapExpr(row, expr.left));
-            const r = Number(evalMapExpr(row, expr.right));
-            switch (expr.op) {
-                case '+': return l + r;
-                case '-': return l - r;
-                case '*': return l * r;
-                case '/': return r === 0 ? null : l / r;
-                default: return null;
-            }
-        }
-        default:
-            return null;
-    }
 }
 
 class DataEngine {
@@ -79,11 +59,9 @@ class DataEngine {
         // smallRowThreshold overrides all for backward compatibility.
         if (Number.isInteger(options.smallRowThreshold)) {
             this._filterThreshold  = options.smallRowThreshold;
-            this._mapThreshold     = options.smallRowThreshold;
             this._groupByThreshold = options.smallRowThreshold;
         } else {
             this._filterThreshold  = Number.isInteger(options.filterThreshold)  ? options.filterThreshold  : 15_000;
-            this._mapThreshold     = Number.isInteger(options.mapThreshold)     ? options.mapThreshold     : 300_000;
             this._groupByThreshold = Number.isInteger(options.groupByThreshold) ? options.groupByThreshold : 2_000;
         }
     }
@@ -98,21 +76,6 @@ class DataEngine {
         return pq;
     }
 
-    _mapField(operations, options) {
-        if (typeof this._engine.mapField === 'function') {
-            return this._engine.mapField(operations, options);
-        }
-        if (typeof this._engine.mapFieldRef === 'function') {
-            let result;
-            this._engine.mapFieldRef(operations, (view) => {
-                result = view;
-                return view;
-            }, options);
-            return result;
-        }
-        throw new TypeError('WASM engine does not expose mapField or mapFieldRef');
-    }
-
     _queryFilter(op, options) {
         const windowed = applyWindow(this._data, options);
         if (windowed.length <= this._filterThreshold) {
@@ -123,37 +86,6 @@ class DataEngine {
         const m = idx.length;
         const rows = new Array(m);
         for (let i = 0; i < m; i++) rows[i] = this._data[idx[i]];
-        return { type: 'array', value: rows };
-    }
-
-    _queryMap(op, options) {
-        const windowed = applyWindow(this._data, options);
-        if (windowed.length <= this._mapThreshold) {
-            const rows = windowed.map((row) => {
-                const out = { ...row };
-                for (const t of op.transforms) out[t.field] = evalMapExpr(out, t.expr);
-                return out;
-            });
-            return { type: 'array', value: rows };
-        }
-
-        const computed = this._mapField([{ op: 'map', transforms: op.transforms }], options);
-        const n = windowed.length;
-        const rows = new Array(n);
-        const entries = Object.entries(computed);
-        const n_fields = entries.length;
-
-        // Pre-extract source keys once to avoid per-row property enumeration.
-        const srcKeys = n > 0 ? Object.keys(windowed[0]) : [];
-        const srcLen = srcKeys.length;
-
-        for (let i = 0; i < n; i++) {
-            const src = windowed[i];
-            const row = {};
-            for (let k = 0; k < srcLen; k++) row[srcKeys[k]] = src[srcKeys[k]];
-            for (let j = 0; j < n_fields; j++) row[entries[j][0]] = entries[j][1][i];
-            rows[i] = row;
-        }
         return { type: 'array', value: rows };
     }
 
@@ -193,9 +125,6 @@ class DataEngine {
         if (operations.length === 1 && operations[0].op === 'filter') {
             return this._queryFilter(operations[0], options);
         }
-        if (operations.length === 1 && operations[0].op === 'map') {
-            return this._queryMap(operations[0], options);
-        }
         if (operations.length === 1 && operations[0].op === 'groupBy' && (!operations[0].aggregate || operations[0].aggregate.length === 0)) {
             return this._queryGroupByNoAgg(operations[0], options);
         }
@@ -220,9 +149,8 @@ class DataEngine {
 
     // Exposed for advanced users
     filterIndices(ops, opts) { return this._engine.filterIndices(ops, opts); }
-    filterView(ops, opts) { return this._engine.filterView(ops, opts); }
     filterViewRef(ops, callback, opts) { return this._engine.filterViewRef(ops, opts, callback); }
-    mapField(ops, opts) { return this._mapField(ops, opts); }
+    mapRef(ops, callback, opts) { return this._engine.mapRef(ops, opts, callback); }
     groupByIndices(field) { return this._engine.groupByIndices(field); }
 }
 

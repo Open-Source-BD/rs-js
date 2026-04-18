@@ -7,29 +7,7 @@ use crate::{
     types::{DataError, Dataset, Operation, PipelineOptions, PipelineResult, Row},
 };
 
-// ── Legacy path: process_raw() passes owned Dataset ──────────────────────────
-
-pub struct Pipeline {
-    data: Dataset,
-}
-
-impl Pipeline {
-    pub fn new(mut data: Dataset, opts: PipelineOptions) -> Self {
-        if let Some(offset) = opts.offset {
-            data = data.into_iter().skip(offset).collect();
-        }
-        if let Some(limit) = opts.limit {
-            data.truncate(limit);
-        }
-        Self { data }
-    }
-
-    pub fn execute(self, ops: Vec<Operation>) -> Result<PipelineResult, DataError> {
-        execute_on_slice(&self.data, ops)
-    }
-}
-
-// ── Core engine: operates on &[Row] — used by both Pipeline and DataEngine ───
+// ── Core engine: operates on &[Row] ──────────────────────────────────────────
 
 /// Execute a pipeline on a borrowed slice.
 /// Intermediate ops (filter, map) produce owned subsets only when needed.

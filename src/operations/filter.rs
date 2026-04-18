@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::engine::execute_on_slice;
-    use crate::types::{Condition, ConditionLogic, FilterOp, Operation, Operator, PipelineResult, Row};
+    use crate::types::{
+        Condition, ConditionLogic, FilterOp, Operation, Operator, PipelineResult, Row,
+    };
     use serde_json::json;
 
     fn make_data() -> Vec<Row> {

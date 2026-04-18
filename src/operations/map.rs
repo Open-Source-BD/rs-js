@@ -43,7 +43,7 @@ fn eval_expr(row: &Row, expr: &MapExpr) -> Result<Value, DataError> {
                 ArithOp::Mul => l * r,
                 ArithOp::Div => {
                     if r == 0.0 {
-                        return Err(DataError::InvalidExpr("division by zero".into()));
+                        return Ok(Value::Null);
                     }
                     l / r
                 }

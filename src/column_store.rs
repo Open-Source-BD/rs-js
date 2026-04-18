@@ -274,39 +274,132 @@ impl ColumnStore {
         start: usize,
         end: usize,
     ) -> Vec<(String, Vec<u32>)> {
-        let Some(Col::Str(key_col)) = self.cols.get(field) else {
-            return vec![];
-        };
-        let n_cats = key_col.categories.len();
-        let codes = key_col.codes.as_slice();
-        let mut buckets: Vec<Vec<u32>> = vec![vec![]; n_cats];
-
         let mask = self.get_bitset(filter, start, end);
 
-        if let Some(m) = &mask {
-            for i in start..end {
-                if m.get(i) {
-                    buckets[codes[i] as usize].push(i as u32);
+        match self.cols.get(field) {
+            // Str: use pre-built categorical codes (O(n) single pass, bucket per category)
+            Some(Col::Str(key_col)) => {
+                let n_cats = key_col.categories.len();
+                let codes = key_col.codes.as_slice();
+                let mut buckets: Vec<Vec<u32>> = vec![vec![]; n_cats];
+                if let Some(m) = &mask {
+                    for i in start..end {
+                        if m.get(i) {
+                            buckets[codes[i] as usize].push(i as u32);
+                        }
+                    }
+                } else {
+                    for i in start..end {
+                        buckets[codes[i] as usize].push(i as u32);
+                    }
                 }
+                key_col
+                    .categories
+                    .iter()
+                    .zip(buckets)
+                    .filter(|(_, v)| !v.is_empty())
+                    .map(|(cat, v)| (cat.clone().unwrap_or_else(|| "null".into()), v))
+                    .collect()
             }
-        } else {
-            for i in start..end {
-                buckets[codes[i] as usize].push(i as u32);
-            }
-        }
 
-        key_col
-            .categories
-            .iter()
-            .zip(buckets)
-            .filter(|(_, v)| !v.is_empty())
-            .map(|(cat, v)| (cat.clone().unwrap_or_else(|| "null".into()), v))
-            .collect()
+            // F64: dynamic bucketing; NaN → "null"; use bit-pattern as hash key
+            Some(Col::F64(col)) => {
+                let mut cat_index: IndexMap<u64, usize> = IndexMap::new();
+                let mut buckets: Vec<Vec<u32>> = Vec::new();
+                let mut null_bucket: Vec<u32> = Vec::new();
+
+                macro_rules! push_row {
+                    ($i:expr) => {{
+                        let v = col[$i];
+                        if v.is_nan() {
+                            null_bucket.push($i as u32);
+                        } else {
+                            let bits = v.to_bits();
+                            let next = cat_index.len();
+                            let idx = *cat_index.entry(bits).or_insert(next);
+                            if idx == buckets.len() {
+                                buckets.push(Vec::new());
+                            }
+                            buckets[idx].push($i as u32);
+                        }
+                    }};
+                }
+
+                if let Some(m) = &mask {
+                    for i in start..end {
+                        if m.get(i) {
+                            push_row!(i);
+                        }
+                    }
+                } else {
+                    for i in start..end {
+                        push_row!(i);
+                    }
+                }
+
+                let mut out: Vec<(String, Vec<u32>)> = cat_index
+                    .keys()
+                    .zip(buckets)
+                    .map(|(bits, v)| (f64::from_bits(*bits).to_string(), v))
+                    .filter(|(_, v)| !v.is_empty())
+                    .collect();
+                if !null_bucket.is_empty() {
+                    out.push(("null".into(), null_bucket));
+                }
+                out
+            }
+
+            // Bool: 3 fixed buckets (false=0 / true=1 / null=255)
+            Some(Col::Bool(col)) => {
+                let mut false_b: Vec<u32> = Vec::new();
+                let mut true_b: Vec<u32> = Vec::new();
+                let mut null_b: Vec<u32> = Vec::new();
+                if let Some(m) = &mask {
+                    for i in start..end {
+                        if m.get(i) {
+                            match col[i] {
+                                0 => false_b.push(i as u32),
+                                1 => true_b.push(i as u32),
+                                _ => null_b.push(i as u32),
+                            }
+                        }
+                    }
+                } else {
+                    for i in start..end {
+                        match col[i] {
+                            0 => false_b.push(i as u32),
+                            1 => true_b.push(i as u32),
+                            _ => null_b.push(i as u32),
+                        }
+                    }
+                }
+                let mut out = Vec::new();
+                if !false_b.is_empty() {
+                    out.push(("false".into(), false_b));
+                }
+                if !true_b.is_empty() {
+                    out.push(("true".into(), true_b));
+                }
+                if !null_b.is_empty() {
+                    out.push(("null".into(), null_b));
+                }
+                out
+            }
+
+            // Unknown or missing field → empty (caller falls back to row engine)
+            _ => vec![],
+        }
     }
 
     // ── compute a single field via MapExpr (returns Float64 column) ───────────
 
     pub fn compute_field(&self, expr: &MapExpr, start: usize, end: usize) -> Vec<f64> {
+        // Fast path: direct field projection → just copy the slice, no per-row eval.
+        if let MapExpr::Field { name } = expr {
+            if let Some(Col::F64(v)) = self.cols.get(name.as_str()) {
+                return v[start..end].to_vec();
+            }
+        }
         (start..end)
             .map(|i| eval_map_expr(&self.cols, expr, i))
             .collect()
@@ -323,11 +416,7 @@ impl ColumnStore {
                     .iter()
                     .find_map(|&i| {
                         let v = col[i];
-                        if v.is_nan() {
-                            None
-                        } else {
-                            Some(v)
-                        }
+                        if v.is_nan() { None } else { Some(v) }
                     })
                     .unwrap_or(0.0));
             }
@@ -337,11 +426,7 @@ impl ColumnStore {
                     .rev()
                     .find_map(|&i| {
                         let v = col[i];
-                        if v.is_nan() {
-                            None
-                        } else {
-                            Some(v)
-                        }
+                        if v.is_nan() { None } else { Some(v) }
                     })
                     .unwrap_or(0.0));
             }
@@ -1109,5 +1194,64 @@ fn col_val_str(cols: &IndexMap<String, Col>, field: &str, i: usize) -> String {
             .clone()
             .unwrap_or_else(|| "null".into()),
         None => "null".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn make_row(pairs: &[(&str, serde_json::Value)]) -> crate::types::Row {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn group_by_indices_f64() {
+        let rows = vec![
+            make_row(&[("score", json!(0.5))]),
+            make_row(&[("score", json!(0.9))]),
+            make_row(&[("score", json!(0.5))]),
+        ];
+        let cs = ColumnStore::from_rows(&rows);
+        let groups = cs.group_by_indices_raw("score", None, 0, 3);
+        assert_eq!(groups.len(), 2);
+        let half = groups.iter().find(|(k, _)| k == "0.5").unwrap();
+        assert_eq!(half.1.len(), 2);
+        let nine = groups.iter().find(|(k, _)| k == "0.9").unwrap();
+        assert_eq!(nine.1.len(), 1);
+    }
+
+    #[test]
+    fn group_by_indices_bool() {
+        let rows = vec![
+            make_row(&[("active", json!(true))]),
+            make_row(&[("active", json!(false))]),
+            make_row(&[("active", json!(true))]),
+        ];
+        let cs = ColumnStore::from_rows(&rows);
+        let groups = cs.group_by_indices_raw("active", None, 0, 3);
+        assert_eq!(groups.len(), 2);
+        let true_g = groups.iter().find(|(k, _)| k == "true").unwrap();
+        let false_g = groups.iter().find(|(k, _)| k == "false").unwrap();
+        assert_eq!(true_g.1.len(), 2);
+        assert_eq!(false_g.1.len(), 1);
+    }
+
+    #[test]
+    fn group_by_indices_f64_with_nan() {
+        let rows = vec![
+            make_row(&[("score", json!(1.0))]),
+            make_row(&[("score", serde_json::Value::Null)]),
+            make_row(&[("score", json!(1.0))]),
+        ];
+        let cs = ColumnStore::from_rows(&rows);
+        let groups = cs.group_by_indices_raw("score", None, 0, 3);
+        assert_eq!(groups.len(), 2);
+        let null_g = groups.iter().find(|(k, _)| k == "null").unwrap();
+        assert_eq!(null_g.1.len(), 1);
     }
 }

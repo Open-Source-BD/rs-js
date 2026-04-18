@@ -74,8 +74,19 @@ export interface FilterView {
   [field: string]: ColumnView;
 }
 
+export interface FilterSelectionRef {
+  indices: Uint32Array;
+  columns: FilterView;
+}
+
+export interface MapRefView {
+  [field: string]: Float64Array | Uint8Array | Uint16Array | StrColumnView | unknown[];
+}
+
 export interface DataEngineOptions {
   smallRowThreshold?: number;
+  filterThreshold?: number;
+  groupByThreshold?: number;
 }
 
 export declare class DataEngine {
@@ -86,13 +97,24 @@ export declare class DataEngine {
     operations: Operation[],
     options?: PipelineOptions,
   ): Uint32Array;
-  /** Returns columnar typed arrays for matching rows — no per-row object serialization. */
-  filterView(operations: Operation[], options?: PipelineOptions): FilterView;
-  /** Returns `{ fieldName: Float64Array }` for each computed map transform. */
-  mapField(
+  /** Calls back with sparse selection indices plus zero-copy window column views. */
+  filterViewRef(
     operations: Operation[],
+    callback: (view: FilterSelectionRef) => unknown,
     options?: PipelineOptions,
-  ): Record<string, Float64Array>;
+  ): unknown;
+  /**
+   * Zero-copy map for all expression types.
+   * Field projections → TypedArray subarrays (zero-copy into WASM memory).
+   * Arithmetic / numeric literals → Float64Array view over WASM-heap Vec.
+   * Template / string literals → JS Array (strings cannot be zero-copy).
+   * Views are only valid during the callback.
+   */
+  mapRef(
+    operations: Operation[],
+    callback: (view: MapRefView) => unknown,
+    options?: PipelineOptions,
+  ): unknown;
   /** Returns `{ groupKey: Uint32Array }` of row indices per group. No row serialization. */
   groupByIndices(field: string): Record<string, Uint32Array>;
   len(): number;

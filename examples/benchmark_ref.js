@@ -25,7 +25,7 @@ console.log('filterView (copy) took:', ((endCopy - startCopy) / 1000000n).toStri
 
 const startRef = process.hrtime.bigint();
 engine.filterViewRef(filterOps, (ref) => {
-    // Access view here
+    // Access ref.indices and ref.columns here
 });
 const endRef = process.hrtime.bigint();
 console.log('filterViewRef (ref) took:', ((endRef - startRef) / 1000000n).toString() + ' ms');

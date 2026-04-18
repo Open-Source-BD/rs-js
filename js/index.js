@@ -215,6 +215,8 @@ export class DataEngine {
 
     filterView(ops, opts) { return this._engine.filterView(ops, opts); }
     filterViewRef(ops, callback, opts) { return this._engine.filterViewRef(ops, opts, callback); }
+    mapViewRef(ops, callback, opts) { return this._engine.mapViewRef(ops, opts, callback); }
+    mapComputed(ops, callback, opts) { return this._engine.mapComputed(ops, opts, callback); }
     mapField(ops, opts) { return this._mapField(ops, opts); }
 
     groupByIndices(field) { return this._engine.groupByIndices(field); }

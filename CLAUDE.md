@@ -30,34 +30,37 @@ cargo fmt
 Rust library compiled to WASM via `wasm-pack`/`wasm-bindgen`. JS calls `engine.query(operations, options?)` → Rust executes a pipeline → returns `{ type, value }` tagged union.
 
 ```
-js/index.js          JS DataEngine wrapper with smart routing + lazy WASM init
+js/index.node.cjs    JS DataEngine wrapper (CJS, Node.js); smart routing + per-op thresholds
 js/index.d.ts        TypeScript definitions (discriminated union on PipelineResult)
 src/lib.rs           #[wasm_bindgen] entrypoints: DataEngine, PreparedQuery
-src/engine.rs        execute_on_slice() — row-based pipeline fold (fallback path)
+src/engine.rs        execute_for_engine() — row-based pipeline fold (fallback path)
 src/column_store.rs  ColumnStore — typed arrays + BitSet; columnar fast path
 src/eval.rs          shared condition evaluator (used by row-based filter + find)
 src/types.rs         Operation enum, PipelineResult, Row = IndexMap<String, Value>
 src/operations/      one file per op: filter, map, reduce, group_by, count, find
 ```
 
-**Primary API**: `createEngine(data)` → `DataEngine`. Data is deserialized into WASM memory once; `.query(ops, opts)` runs without re-serializing the dataset. `.free()` must be called to release WASM memory.
+**Primary API**: `new DataEngine(data)` (Node) or `createEngine(data)` (browser/async). Data is deserialized into WASM memory once; `.query(ops, opts)` runs without re-serializing the dataset. `.free()` must be called to release WASM memory.
 
 **Dual data representation**: `DataEngine::new()` builds both a row store (`Vec<Row>`) and a `ColumnStore` (typed arrays: `Col::F64`, `Col::Bool`, `Col::Str`). Every query chooses a path:
 - **Columnar fast path** (`try_columnar` in `column_store.rs`): scalar-returning ops (count, reduce, find, groupBy with aggregates). Operates on typed arrays via `BitSet` masking — zero row allocation.
-- **Row-based fallback** (`execute_on_slice` in `engine.rs`): array-returning ops (filter, map, groupBy without aggregates). Uses a `Working` enum to defer cloning until a map op forces materialization.
+- **Row-based fallback** (`execute_for_engine` in `engine.rs`): array-returning ops (filter, map, groupBy without aggregates). Uses a `Working` enum to defer cloning until a map op forces materialization.
 
-**JS-side routing** (in `js/index.js`): Before hitting WASM, `DataEngine.query()` applies a `smallRowThreshold` (default 2000) check:
-- Single filter, small data → pure JS evaluation
-- Single filter, large data → `filterIndices()` WASM call, then JS index lookup
-- Single map, large data → `mapField()` returns `Float64Array` columns; JS merges with original rows
-- groupBy without aggregates → `groupByIndices()` returns `{ key: Uint32Array }`
+**JS-side routing** (`js/index.node.cjs`): Before hitting WASM, `DataEngine.query()` routes by per-op thresholds tuned from benchmarks:
+- Single filter: JS path below `filterThreshold` (default 15,000 rows), else `filterIndices()` + index lookup
+- Single map: JS path below `mapThreshold` (default 300,000 rows), else `mapField()` returns `Float64Array` columns; JS merges with original rows
+- groupBy without aggregates: JS path below `groupByThreshold` (default 2,000 rows), else `groupByIndices()` returns `{ key: Uint32Array }`
 - All other pipelines → `PreparedQuery` (ops parsed once, reused) + `queryPrepared()`
+- `smallRowThreshold` option overrides all three thresholds (backwards compatibility)
 
 **Low-level columnar methods** (bypass the row engine entirely):
 - `filterIndices(ops, opts)` → `Uint32Array` of matching row indices
-- `filterView(ops, opts)` → `{ field: Float64Array | Uint8Array | { codes: Uint16Array, categories: string[] } }`
-- `mapField(ops, opts)` → `{ field: Float64Array }` for each map transform
-- `groupByIndices(field)` → `{ groupKey: Uint32Array }`
+- `filterView(ops, opts)` → `{ field: Float64Array | Uint8Array | { codes: Uint16Array, categories: string[] } }` — copies data out of WASM heap
+- `filterViewRef(ops, callback, opts)` → calls `callback({ indices: Uint32Array, columns: FilterView })` with zero-copy window views into WASM memory; do not call other WASM methods while views are live
+- `mapField(ops, opts)` → `{ field: Float64Array }` for each map transform (computed columns only)
+- `mapViewRef(ops, callback, opts)` → calls `callback(MapViewRef)` with zero-copy column views for direct field projections only (no arithmetic)
+- `mapComputed(ops, callback, opts)` → calls `callback(MapComputedView)` with materialized computed columns (`Float64Array` for arithmetic, `Array` for template/field)
+- `groupByIndices(field)` → `{ groupKey: Uint32Array }` of row indices per group
 
 **Operation model**: `filter` and `map` are intermediate (chainable); `reduce`, `groupBy`, `count`, `find` are terminal (consume data, return immediately). Engine enforces this by position in the pipeline.
 
@@ -96,5 +99,6 @@ Operations use `#[serde(tag = "op")]` — discriminant is the `"op"` field:
 - Always use `Serializer::json_compatible()` when serialising back to `JsValue` — default in serde-wasm-bindgen 0.6 emits `BigInt` for large integers.
 - `ReduceOp` derives `Clone` — required by `group_by.rs` aggregate loop.
 - `[profile.test]` overrides `panic = "unwind"` so `#[should_panic]` tests work despite `panic = "abort"` in release.
-- `groupByIndices` only works on `Col::Str` columns; returns empty for numeric/bool group keys.
+- `groupByIndices` supports all column types: `Col::Str` uses categorical codes (fast), `Col::F64` buckets by bit-pattern (`to_bits()`, NaN→"null"), `Col::Bool` uses 3 fixed buckets ("false"/"true"/"null").
+- `filterViewRef` and `mapViewRef` return zero-copy TypedArray views into WASM linear memory. Any Rust allocation (i.e., calling another WASM method) while the view is held can invalidate the backing memory.
 - `try_columnar` returns `None` (falls back to row engine) when the pipeline has ops after a terminal, or when the terminal is a `Map`.
