@@ -1,19 +1,112 @@
-# Repository Guidelines
+# Repository Guidelines for AI Agents
 
-## Project Structure & Module Organization
-`src/` contains the Rust core and operation engine. Key modules include `engine.rs`, `column_store.rs`, `eval.rs`, and `src/operations/` for pipeline steps such as `filter`, `map`, `reduce`, and `group_by`. `js/` contains the JavaScript entry points, Node/browser wrappers, TypeScript declarations, and Jest tests in `js/__tests__/`. `examples/` holds runnable usage samples, while `benchmark.js` measures performance. Generated WASM outputs land in `pkg-node/`, `pkg/`, and `pkg-web/`.
+## Project Overview
 
-## Build, Test, and Development Commands
-Use `npm run build` to build the Node-targeted WASM package into `pkg-node/`. Use `npm run build:web` or `npm run build:bundler` for browser or bundler artifacts, or `npm run build:all` to generate all outputs. Run `npm test` for the Jest suite and `npm run test:rust` for Rust tests via `cargo test`. Use `npm run benchmark` to compare runtime performance on larger datasets.
+`rs-js` is a high-performance Rust/WASM data engine for JavaScript. It exposes a `RsJs` class (Node.js CJS via `js/index.node.cjs`, browser ESM via `js/index.js`) that loads row data once into WASM linear memory and supports repeated zero-copy queries. Up to 45× faster than native JS for columnar analytics.
 
-## Coding Style & Naming Conventions
-Follow standard Rust formatting with 4-space indentation and run `cargo fmt` before submitting Rust changes. Keep Rust modules snake_case (`group_by.rs`) and Rust types PascalCase (`DataEngine`, `PreparedQuery`). In JavaScript, match the existing 4-space indentation, use camelCase for methods and variables, and keep public API names aligned with the package surface in `js/index.js` and `js/index.d.ts`. Prefer small, focused modules over adding logic directly to entry files.
+---
+
+## Project Structure
+
+```
+src/
+  lib.rs              #[wasm_bindgen] entrypoints: DataEngine, PreparedQuery
+  engine.rs           execute_for_engine() — row-based pipeline (fallback path)
+  column_store.rs     ColumnStore — typed arrays + BitSet; columnar fast path
+  eval.rs             shared condition evaluator (filter + find)
+  types.rs            Operation enum, PipelineResult, Row = IndexMap<String, Value>
+  operations/         one file per op: filter, map, reduce, group_by, count, find
+
+js/
+  index.node.cjs      JS wrapper (CJS, Node.js) — smart routing + per-op thresholds
+  index.js            JS wrapper (ESM, browser/bundler)
+  index.d.ts          TypeScript definitions (discriminated unions)
+  __tests__/          Jest integration tests
+
+examples/             runnable usage samples (01–08)
+benchmark.js          performance comparison vs native JS
+pkg-node/             generated WASM (Node.js target) — do not hand-edit
+pkg/                  generated WASM (bundler target) — do not hand-edit
+pkg-web/              generated WASM (web target) — do not hand-edit
+```
+
+---
+
+## Public API (current)
+
+**Core class:** `RsJs` (not `DataEngine` — that is the internal WASM class)
+
+```js
+const { RsJs } = require('rs-js');          // Node.js CJS
+import { createRsJs } from 'rs-js';         // Browser ESM (async)
+
+const engine = new RsJs(data, options?);
+engine.query(operations, options?)           // → PipelineResult
+engine.filterIndices(ops, opts?)             // → Uint32Array
+engine.filterViewRef(ops, callback, opts?)   // → zero-copy callback
+engine.mapRef(ops, callback, opts?)          // → zero-copy callback
+engine.filterMapRef(fOps, mOps, callback, opts?) // → zero-copy callback
+engine.groupByIndices(field)                 // → { key: Uint32Array }
+engine.len()
+engine.is_empty()
+engine.free()
+```
+
+**Operations:** `filter`, `map`, `reduce`, `groupBy`, `count`, `find`
+
+**PipelineResult** is a discriminated union — always check `.type` before `.value`.
+
+---
+
+## Build Commands
+
+```bash
+cargo check --target wasm32-unknown-unknown          # type-check only (fast)
+wasm-pack build --release --target nodejs --out-dir pkg-node
+wasm-pack build --release --target bundler --out-dir pkg
+wasm-pack build --release --target web    --out-dir pkg-web
+cargo test                                            # Rust unit tests
+npm test                                             # Jest integration tests
+node benchmark.js                                    # performance benchmark
+```
+
+---
+
+## Coding Conventions
+
+**Rust:**
+- Always use `Serializer::json_compatible()` when returning `JsValue` — default emits `BigInt` for large integers
+- Prefer `ColumnStore` fast paths for numeric ops; add fallback in `engine.rs` only if columnar path is impossible
+- `ReduceOp` derives `Clone` — required by `group_by.rs` aggregate loop
+- `[profile.test]` overrides `panic = "unwind"` to allow `#[should_panic]` tests
+- `Col::F64` uses `f64::NAN` for null; `Col::Bool` uses `255` for null
+
+**JavaScript:**
+- `js/index.node.cjs` and `js/index.js` must stay in sync — same logic, different module format
+- Per-op thresholds: `_filterThreshold=15k`, `_mapThreshold=MAX_SAFE_INTEGER`, `_groupByThreshold=30k`
+- `_mapThreshold=MAX_SAFE_INTEGER` is intentional — mapRef+merge overhead exceeds JS spread at all sizes
+- `_queryFilterMap` uses `filterIndices` + compiled JS exprs, not `filterMapRef` (row-object output)
+- `compileExpr` eliminates per-row recursive dispatch; fast path for `field OP literal` pattern
+
+**TypeScript:**
+- `index.d.ts` must match all exported methods with correct signatures
+- `PipelineResult` is a discriminated union — `type` field is the discriminant
+- Zero-copy API types: `FilterMapRef`, `FilterSelectionRef`, `MapRefView`
+
+---
 
 ## Testing Guidelines
-Add JS behavior tests under `js/__tests__/` using `*.test.js` naming; mirror the existing `DataEngine` scenarios with explicit operation names like `test('filter')`. Add Rust unit tests alongside the relevant module or in `tests/` if coverage expands. Cover both happy paths and edge cases around pipeline options, typed outputs, and small-vs-large dataset behavior.
 
-## Commit & Pull Request Guidelines
-Recent history follows Conventional Commit style: `feat: ...`, `refactor: ...`, `chore: ...`. Keep commit subjects imperative and scoped to one change. Pull requests should describe the user-visible impact, list commands run for verification, and link related issues. Include benchmarks or example output when changing query performance or API behavior.
+- JS tests live in `js/__tests__/dataEngine.test.js` — 74+ tests, all must pass
+- Cover: all ops, zero-copy APIs (filterMapRef, filterViewRef, mapRef), edge cases (empty result, zero rows)
+- Match existing test naming: `describe('filterMapRef')`, `test('count matches expected')`
+- Rust unit tests: alongside relevant module or in `tests/`
 
-## Build Artifacts & Configuration
-Do not hand-edit generated `pkg-*` output unless the change specifically targets packaging. Rust build settings live in `Cargo.toml`; JS package metadata lives in the root `package.json` and `js/package.json`. If you change exported APIs, update the implementation, typings, README examples, and tests together.
+---
+
+## Commit & PR Guidelines
+
+- Conventional Commits: `feat:`, `refactor:`, `chore:`, `fix:`
+- Include benchmark output or test results when changing performance-sensitive code
+- If changing exported API: update `lib.rs`, `index.node.cjs`, `index.js`, `index.d.ts`, tests, README together
+- Do not hand-edit generated `pkg-*` directories
