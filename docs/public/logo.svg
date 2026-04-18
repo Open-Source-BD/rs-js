@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 56" fill="none">
+  <defs>
+    <linearGradient id="hex-g" x1="0" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#5b21b6"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="accent-g" x1="0" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#fb923c"/>
+    </linearGradient>
+    <linearGradient id="text-g" x1="0" y1="0" x2="200" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#94a3b8"/>
+    </linearGradient>
+    <filter id="hex-shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#7c3aed" flood-opacity="0.4"/>
+    </filter>
+    <filter id="dot-glow">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Hexagon icon (flat-top, 50px) -->
+  <g filter="url(#hex-shadow)">
+    <path d="M28 3 L50 15.5 L50 40.5 L28 53 L6 40.5 L6 15.5 Z"
+          fill="url(#hex-g)" stroke="rgba(139,92,246,0.3)" stroke-width="0.5"/>
+    <!-- inner facet lines -->
+    <path d="M28 3 L50 15.5 M50 40.5 L28 53"
+          stroke="rgba(255,255,255,0.06)" stroke-width="0.5"/>
+    <path d="M28 8 L46 18.5 L46 37.5 L28 48 L10 37.5 L10 18.5 Z"
+          fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="0.5"/>
+  </g>
+
+  <!-- "rs" monogram -->
+  <text x="28" y="35"
+        text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', monospace"
+        font-size="19"
+        font-weight="700"
+        letter-spacing="-0.5"
+        fill="white"
+        opacity="0.95">rs</text>
+
+  <!-- Orange accent dot -->
+  <circle cx="43.5" cy="14" r="5.5" fill="url(#accent-g)" filter="url(#dot-glow)"/>
+  <circle cx="43.5" cy="14" r="2.5" fill="white" opacity="0.95"/>
+
+  <!-- Wordmark: "rs-js" -->
+  <text x="66" y="32"
+        font-family="'JetBrains Mono', 'Fira Code', monospace"
+        font-size="22"
+        font-weight="700"
+        letter-spacing="-0.5"
+        fill="url(#text-g)">rs-js</text>
+
+  <!-- Tagline -->
+  <text x="67" y="46"
+        font-family="'Inter', system-ui, sans-serif"
+        font-size="9"
+        font-weight="500"
+        letter-spacing="2"
+        fill="#64748b"
+        text-transform="uppercase">WASM DATA ENGINE</text>
+
+  <!-- Subtle column-chart data bars (speed motif) -->
+  <rect x="195" y="30" width="5" height="13" rx="1" fill="#7c3aed" opacity="0.5"/>
+  <rect x="203" y="22" width="5" height="21" rx="1" fill="#8b5cf6" opacity="0.6"/>
+  <rect x="211" y="14" width="5" height="29" rx="1" fill="#f97316" opacity="0.7"/>
+  <rect x="219" y="10" width="5" height="33" rx="1" fill="#fb923c" opacity="0.8"/>
+  <rect x="227" y="5"  width="5" height="38" rx="1" fill="#fbbf24" opacity="0.9"/>
+</svg>

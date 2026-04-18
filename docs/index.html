@@ -3,11 +3,58 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>rs-js — High-Performance WASM Data Engine</title>
-    <meta name="description" content="rs-js: Rust/WASM data engine for JavaScript. Deserialize once, query many times. Up to 18× faster than native JS for columnar operations." />
+
+    <!-- Primary SEO -->
+    <title>rs-js — High-Performance WASM Data Engine for JavaScript</title>
+    <meta name="description" content="rs-js is a Rust/WebAssembly data engine for JavaScript. Filter, map, reduce, and group large datasets up to 45× faster than native JS. Zero-copy columnar APIs, TypeScript support, works in Node.js and browsers." />
+    <meta name="keywords" content="wasm, webassembly, rust, javascript, data engine, filter, map, reduce, groupby, columnar, zero-copy, typescript, nodejs, performance" />
+    <meta name="author" content="rs-js" />
+    <link rel="canonical" href="https://shaon07.github.io/rs-js/" />
+
+    <!-- Open Graph (Facebook, LinkedIn, Discord) -->
+    <meta property="og:type"        content="website" />
+    <meta property="og:url"         content="https://shaon07.github.io/rs-js/" />
+    <meta property="og:title"       content="rs-js — High-Performance WASM Data Engine for JavaScript" />
+    <meta property="og:description" content="Deserialize once, query many times. Up to 45× faster than native JS for columnar analytics. Zero-copy typed-array APIs for Node.js and browsers." />
+    <meta property="og:image"       content="https://shaon07.github.io/rs-js/og-image.png" />
+    <meta property="og:site_name"   content="rs-js Documentation" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card"        content="summary_large_image" />
+    <meta name="twitter:title"       content="rs-js — WASM Data Engine for JavaScript" />
+    <meta name="twitter:description" content="Rust/WASM data engine. Filter 100k rows in 0.68ms. Up to 45× faster than native JS. Zero-copy columnar APIs." />
+    <meta name="twitter:image"       content="https://shaon07.github.io/rs-js/og-image.png" />
+
+    <!-- Favicon -->
+    <link rel="icon"             type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon"   type="image/x-icon"  href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180"       href="/favicon.svg" />
+    <meta name="theme-color" content="#7c3aed" />
+
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <!-- Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "rs-js",
+      "description": "High-performance Rust/WebAssembly data engine for JavaScript. Up to 45× faster than native JS for columnar analytics.",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Node.js, Browser",
+      "programmingLanguage": ["JavaScript", "TypeScript", "Rust"],
+      "url": "https://shaon07.github.io/rs-js/",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "license": "https://opensource.org/licenses/MIT"
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
