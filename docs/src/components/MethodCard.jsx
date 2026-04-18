@@ -1,4 +1,5 @@
 import CodeBlock from './CodeBlock.jsx';
+import { TypeText } from '../utils/typeLinks.jsx';
 
 const RETURN_BADGE = {
   intermediate: { label: 'intermediate', cls: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
@@ -67,8 +68,12 @@ export default function MethodCard({ method }) {
                 {method.params.map((p, i) => (
                   <tr key={i} className="border-b border-slate-800/80 last:border-0 hover:bg-slate-800/20">
                     <td className="px-4 py-3 font-mono text-violet-300 text-xs whitespace-nowrap">{p.name}</td>
-                    <td className="px-4 py-3 font-mono text-cyan-400 text-xs">{p.type}</td>
-                    <td className="px-4 py-3 text-slate-400 text-xs leading-relaxed whitespace-pre-line">{p.description}</td>
+                    <td className="px-4 py-3 font-mono text-cyan-400 text-xs">
+                      <TypeText text={p.type} className="text-cyan-400" />
+                    </td>
+                    <td className="px-4 py-3 text-slate-400 text-xs leading-relaxed whitespace-pre-line">
+                      <TypeText text={p.description} className="text-slate-400" />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -80,7 +85,9 @@ export default function MethodCard({ method }) {
       {/* Returns */}
       <div className="mb-6">
         <h4 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">Returns</h4>
-        <p className="text-slate-400 text-sm font-mono whitespace-pre-line leading-relaxed">{method.returns}</p>
+        <p className="text-slate-400 text-sm font-mono whitespace-pre-line leading-relaxed">
+          <TypeText text={method.returns} className="text-slate-400" />
+        </p>
       </div>
 
       {/* Examples */}

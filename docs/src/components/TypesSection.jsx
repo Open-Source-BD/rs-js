@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { types } from '../data/types.js';
 import CodeBlock from './CodeBlock.jsx';
+import { TypeText, USED_BY_ANCHORS } from '../utils/typeLinks.jsx';
 
 const KIND_BADGE = {
   'type alias': 'bg-amber-500/10 text-amber-400 border-amber-500/25',
@@ -28,17 +29,30 @@ function TypeCard({ type }) {
         {type.usedBy?.length > 0 && (
           <div className="flex items-center gap-1.5 ml-auto flex-wrap">
             <span className="text-xs text-slate-600">used by</span>
-            {type.usedBy.map((u) => (
-              <span key={u} className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50">
-                {u}
-              </span>
-            ))}
+            {type.usedBy.map((u) => {
+              const anchor = USED_BY_ANCHORS[u];
+              return anchor ? (
+                <a
+                  key={u}
+                  href={`#${anchor}`}
+                  className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-800 text-violet-400 border border-violet-500/30 hover:bg-violet-500/10 hover:text-violet-300 transition-colors"
+                >
+                  {u}
+                </a>
+              ) : (
+                <span key={u} className="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/50">
+                  {u}
+                </span>
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* Description */}
-      <p className="text-slate-300 leading-relaxed mb-5">{type.description}</p>
+      <p className="text-slate-300 leading-relaxed mb-5">
+        <TypeText text={type.description} className="text-slate-300" />
+      </p>
 
       {/* Definition */}
       <div className="mb-5">
