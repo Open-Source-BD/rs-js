@@ -1,5 +1,5 @@
 use crate::types::{
-    ArithOp, Condition, ConditionLogic, DataError, GroupByOp, MapExpr, Operation, Operator,
+    Condition, ConditionLogic, DataError, GroupByOp, Operation, Operator,
     PipelineResult, ReduceOp, Reducer, Row,
 };
 use indexmap::IndexMap;
@@ -389,20 +389,6 @@ impl ColumnStore {
             // Unknown or missing field → empty (caller falls back to row engine)
             _ => vec![],
         }
-    }
-
-    // ── compute a single field via MapExpr (returns Float64 column) ───────────
-
-    pub fn compute_field(&self, expr: &MapExpr, start: usize, end: usize) -> Vec<f64> {
-        // Fast path: direct field projection → just copy the slice, no per-row eval.
-        if let MapExpr::Field { name } = expr {
-            if let Some(Col::F64(v)) = self.cols.get(name.as_str()) {
-                return v[start..end].to_vec();
-            }
-        }
-        (start..end)
-            .map(|i| eval_map_expr(&self.cols, expr, i))
-            .collect()
     }
 
     fn reduce_on_indices(&self, op: &ReduceOp, indices: &[usize]) -> Result<f64, DataError> {
@@ -1151,27 +1137,6 @@ impl ColumnStore {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn eval_map_expr(cols: &IndexMap<String, Col>, expr: &MapExpr, i: usize) -> f64 {
-    match expr {
-        MapExpr::Literal { value } => value.as_f64().unwrap_or(f64::NAN),
-        MapExpr::Field { name } => match cols.get(name) {
-            Some(Col::F64(v)) => v[i],
-            _ => f64::NAN,
-        },
-        MapExpr::Arithmetic { op, left, right } => {
-            let l = eval_map_expr(cols, left, i);
-            let r = eval_map_expr(cols, right, i);
-            match op {
-                ArithOp::Add => l + r,
-                ArithOp::Sub => l - r,
-                ArithOp::Mul => l * r,
-                ArithOp::Div => l / r,
-            }
-        }
-        MapExpr::Template { .. } => f64::NAN,
-    }
-}
 
 fn col_val_str(cols: &IndexMap<String, Col>, field: &str, i: usize) -> String {
     match cols.get(field) {

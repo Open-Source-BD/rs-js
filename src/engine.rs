@@ -4,7 +4,7 @@ use crate::{
         count::apply_count, find::apply_find, group_by::apply_group_by, map::apply_map,
         reduce::apply_reduce,
     },
-    types::{DataError, Dataset, Operation, PipelineOptions, PipelineResult, Row},
+    types::{DataError, Operation, PipelineOptions, PipelineResult, Row},
 };
 
 // ── Core engine: operates on &[Row] ──────────────────────────────────────────
@@ -192,7 +192,7 @@ pub fn execute_for_engine(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Condition, ConditionLogic, CountOp, FilterOp, Operator, ReduceOp, Reducer};
+    use crate::types::{Condition, ConditionLogic, CountOp, Dataset, FilterOp, Operator, ReduceOp, Reducer};
     use serde_json::json;
 
     fn make_data() -> Dataset {
