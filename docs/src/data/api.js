@@ -27,7 +27,7 @@ export const categories = [
         returns: 'New RsJs engine instance.',
         examples: [
           {
-            code: `const { RsJs } = require('rs-js');
+            code: `const { RsJs } = require('@shaon07/rs-js');
 
 const users = [
   { id: 1, name: 'Alice', age: 32, salary: 85000, active: true,  department: 'engineering' },
@@ -70,7 +70,7 @@ const engine2 = new RsJs(users, {
         returns: 'Promise<RsJs> — resolves once the WASM module is ready.',
         examples: [
           {
-            code: `import { createRsJs } from 'rs-js';
+            code: `import { createRsJs } from '@shaon07/rs-js';
 
 const data = await fetch('/api/users').then(r => r.json());
 const engine = await createRsJs(data);
