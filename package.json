@@ -1,6 +1,6 @@
 {
   "name": "@shaon07/rs-js",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "High-performance data processing engine for JS/TS. Features WASM SIMD-accelerated filtering, mapping, and columnar-storage for 10x faster processing of large datasets.",
   "main": "js/index.node.cjs",
   "module": "js/index.js",
