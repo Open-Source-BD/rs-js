@@ -1,59 +1,195 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
 
     <!-- Primary SEO -->
-    <title>rs-js — High-Performance WASM Data Engine for JavaScript</title>
-    <meta name="description" content="rs-js is a Rust/WebAssembly data engine for JavaScript. Filter, map, reduce, and group large datasets up to 45× faster than native JS. Zero-copy columnar APIs, TypeScript support, works in Node.js and browsers." />
-    <meta name="keywords" content="wasm, webassembly, rust, javascript, data engine, filter, map, reduce, groupby, columnar, zero-copy, typescript, nodejs, performance" />
-    <meta name="author" content="rs-js" />
+    <title>
+      rs-js — Rust/WASM Data Engine · Up to 52× Faster than Native JS
+    </title>
+    <meta
+      name="description"
+      content="rs-js: Rust/WebAssembly data engine for JavaScript. Filter, map, reduce, groupBy, and find across millions of rows — up to 52× faster than native JS. Zero-copy columnar APIs. Works in Node.js and browsers. npm i @shaon07/rs-js"
+    />
+    <meta
+      name="keywords"
+      content="wasm, webassembly, rust, javascript, typescript, data engine, filter, map, reduce, groupby, find, columnar, zero-copy, performance, nodejs, browser, npm, analytics, big data, dataframe, polars, duckdb, in-memory, simd, binary search"
+    />
+    <meta name="author" content="shaon07" />
+    <meta
+      name="robots"
+      content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1"
+    />
     <link rel="canonical" href="https://shaon07.github.io/rs-js/" />
 
-    <!-- Open Graph (Facebook, LinkedIn, Discord) -->
-    <meta property="og:type"        content="website" />
-    <meta property="og:url"         content="https://shaon07.github.io/rs-js/" />
-    <meta property="og:title"       content="rs-js — High-Performance WASM Data Engine for JavaScript" />
-    <meta property="og:description" content="Deserialize once, query many times. Up to 45× faster than native JS for columnar analytics. Zero-copy typed-array APIs for Node.js and browsers." />
-    <meta property="og:image"       content="https://shaon07.github.io/rs-js/og-image.png" />
-    <meta property="og:site_name"   content="rs-js Documentation" />
+    <!-- Open Graph (Facebook, LinkedIn, Discord, Slack) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://shaon07.github.io/rs-js/" />
+    <meta
+      property="og:title"
+      content="rs-js — Rust/WASM Data Engine · Up to 52× Faster than Native JS"
+    />
+    <meta
+      property="og:description"
+      content="Deserialize once, query many times. Filter 100k rows in 0.68ms. find() by id in 0.01ms (52× faster). Zero-copy typed-array APIs for Node.js and browsers. npm i @shaon07/rs-js"
+    />
+    <meta
+      property="og:image"
+      content="https://shaon07.github.io/rs-js/og-image.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="rs-js benchmark — 52× faster than native JS"
+    />
+    <meta property="og:site_name" content="rs-js" />
+    <meta property="og:locale" content="en_US" />
 
-    <!-- Twitter Card -->
-    <meta name="twitter:card"        content="summary_large_image" />
-    <meta name="twitter:title"       content="rs-js — WASM Data Engine for JavaScript" />
-    <meta name="twitter:description" content="Rust/WASM data engine. Filter 100k rows in 0.68ms. Up to 45× faster than native JS. Zero-copy columnar APIs." />
-    <meta name="twitter:image"       content="https://shaon07.github.io/rs-js/og-image.png" />
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@shaon07" />
+    <meta name="twitter:creator" content="@shaon07" />
+    <meta
+      name="twitter:title"
+      content="rs-js — Rust/WASM Data Engine for JavaScript"
+    />
+    <meta
+      name="twitter:description"
+      content="52× faster find(). 50× faster mapRef projection. Zero-copy WASM typed arrays. Works in Node.js + browsers. npm i @shaon07/rs-js"
+    />
+    <meta
+      name="twitter:image"
+      content="https://shaon07.github.io/rs-js/og-image.png"
+    />
+    <meta
+      name="twitter:image:alt"
+      content="rs-js benchmark — up to 52× faster than native JS"
+    />
+
+    <!-- GitHub / developer community -->
+    <meta name="github:repo" content="Open-Source-BD/rs-js" />
 
     <!-- Favicon -->
-    <link rel="icon"             type="image/svg+xml" href="/favicon.svg" />
-    <link rel="alternate icon"   type="image/x-icon"  href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180"       href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon.svg" />
     <meta name="theme-color" content="#7c3aed" />
 
-    <!-- Fonts -->
+    <!-- Fonts — preconnect first, then load -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
 
-    <!-- Structured Data (JSON-LD) -->
+    <!-- Structured Data — SoftwareApplication -->
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "rs-js",
-      "description": "High-performance Rust/WebAssembly data engine for JavaScript. Up to 45× faster than native JS for columnar analytics.",
-      "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "Node.js, Browser",
-      "programmingLanguage": ["JavaScript", "TypeScript", "Rust"],
-      "url": "https://shaon07.github.io/rs-js/",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      },
-      "license": "https://opensource.org/licenses/MIT"
-    }
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "rs-js",
+        "alternateName": "@shaon07/rs-js",
+        "description": "High-performance Rust/WebAssembly data engine for JavaScript. Filter, map, reduce, groupBy, and find across millions of rows — up to 52× faster than native JS. Zero-copy columnar typed-array APIs for Node.js and browsers.",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Data Processing Library",
+        "operatingSystem": ["Node.js", "Browser", "Deno"],
+        "programmingLanguage": [
+          "JavaScript",
+          "TypeScript",
+          "Rust",
+          "WebAssembly"
+        ],
+        "url": "https://shaon07.github.io/rs-js/",
+        "downloadUrl": "https://www.npmjs.com/package/@shaon07/rs-js",
+        "installUrl": "https://www.npmjs.com/package/@shaon07/rs-js",
+        "softwareVersion": "0.1.5",
+        "releaseNotes": "Binary search for find (52×), StrMultiCode category pre-filter, masked reduce fast path",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "license": "https://opensource.org/licenses/MIT",
+        "codeRepository": "https://github.com/Open-Source-BD/rs-js",
+        "author": {
+          "@type": "Person",
+          "name": "shaon07",
+          "url": "https://github.com/shaon07"
+        },
+        "keywords": "wasm, webassembly, rust, javascript, data engine, columnar, zero-copy, performance, analytics"
+      }
+    </script>
+
+    <!-- Structured Data — SoftwareSourceCode -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        "name": "rs-js source code",
+        "description": "Rust source compiled to WebAssembly via wasm-pack. Columnar store with BitSet masking, binary search index, and SIMD-friendly reduce loops.",
+        "codeRepository": "https://github.com/Open-Source-BD/rs-js",
+        "programmingLanguage": [
+          { "@type": "ComputerLanguage", "name": "Rust" },
+          { "@type": "ComputerLanguage", "name": "JavaScript" },
+          { "@type": "ComputerLanguage", "name": "TypeScript" }
+        ],
+        "runtimePlatform": ["Node.js", "Browser", "WebAssembly"],
+        "license": "https://opensource.org/licenses/MIT"
+      }
+    </script>
+
+    <!-- Structured Data — FAQPage (surfaces in Google rich results) -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "How much faster is rs-js than native JavaScript?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "rs-js is up to 52× faster than native JavaScript for find() with binary search, 50× faster for mapRef column projection, 6–14× faster for reduce and count, and 3–4× faster for filterMapRef columnar analytics at 500k rows."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does rs-js work in the browser?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. rs-js ships a WebAssembly bundle for browsers (ESM via createRsJs) and a separate Node.js CommonJS build. Both use the same Rust engine compiled with wasm-pack."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I install rs-js?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "npm install @shaon07/rs-js — then const { RsJs } = require('@shaon07/rs-js') in Node.js, or import { createRsJs } from '@shaon07/rs-js' in the browser."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is zero-copy in rs-js?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Zero-copy APIs (filterViewRef, mapRef, filterMapRef) return TypedArray views directly into WASM linear memory — no JavaScript objects are created, no data is copied. This is 5–52× faster than row-object output."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is rs-js a replacement for DuckDB-WASM or Polars?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "rs-js is a lightweight embeddable query engine focused on in-memory analytics over JavaScript row arrays. It has no SQL layer and no disk persistence. It complements DuckDB-WASM for workloads where you already have JS objects and need fast repeated queries without serialization overhead."
+            }
+          }
+        ]
+      }
     </script>
   </head>
   <body>

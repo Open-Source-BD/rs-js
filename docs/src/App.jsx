@@ -129,7 +129,7 @@ export default function App() {
 
         <div className="flex items-center gap-3">
           <span className="text-xs bg-violet-500/15 text-violet-400 border border-violet-500/30 px-2 py-0.5 rounded font-mono hidden sm:block">
-            v.0.1.4
+            v.0.1.5
           </span>
           <a
             href="https://github.com/Open-Source-BD/rs-js"
@@ -183,7 +183,7 @@ export default function App() {
               {[
                 { label: "filterMapRef", value: "5–18×", color: "violet" },
                 { label: "mapRef projection", value: "29×", color: "cyan" },
-                { label: "groupBy + agg", value: "6×", color: "emerald" },
+                { label: "find (binary search)", value: "52×", color: "emerald" },
                 { label: "reduce / count", value: "4–8×", color: "amber" },
               ].map(({ label, value, color }) => (
                 <div

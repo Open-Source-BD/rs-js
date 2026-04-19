@@ -273,6 +273,10 @@ export class RsJs {
         return this._engine.queryPrepared(prepared, options);
     }
 
+    queryAsync(operations, options) {
+        return Promise.resolve().then(() => this.query(operations, options));
+    }
+
     free() {
         for (const pq of this._prepared.values()) pq.free();
         this._prepared.clear();
