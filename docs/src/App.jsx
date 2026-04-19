@@ -111,6 +111,14 @@ export default function App() {
           <MenuIcon />
         </button>
 
+        <a
+          href="/"
+          className="flex items-center shrink-0"
+          aria-label="rs-js home"
+        >
+          <img src="/logo.svg" alt="rs-js" className="h-8" />
+        </a>
+
         <div className="flex items-center gap-2 lg:ml-72">
           <span className="text-xs text-slate-500 hidden sm:block">
             High-Performance WASM Data Engine for JavaScript
