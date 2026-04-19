@@ -202,8 +202,9 @@ impl AggBuf {
 
 pub(crate) struct ColumnStore {
     pub(crate) cols: IndexMap<String, Col>,
-    // Pre-computed per-column: true if any NaN/null exists. Used to skip NaN checks in hot loops.
     pub(crate) f64_any_nan: IndexMap<String, bool>,
+    // Sorted (value, row_index) pairs per F64 column (NaN rows excluded). Enables binary search for find(Eq).
+    pub(crate) f64_sorted: IndexMap<String, Vec<(f64, u32)>>,
     pub len: usize,
 }
 
@@ -214,6 +215,7 @@ impl ColumnStore {
             return Self {
                 cols: IndexMap::new(),
                 f64_any_nan: IndexMap::new(),
+                f64_sorted: IndexMap::new(),
                 len: 0,
             };
         }
@@ -231,7 +233,23 @@ impl ColumnStore {
                 }
             })
             .collect();
-        Self { cols, f64_any_nan, len }
+        let f64_sorted: IndexMap<String, Vec<(f64, u32)>> = cols
+            .iter()
+            .filter_map(|(name, col)| {
+                if let Col::F64(data) = col {
+                    let mut pairs: Vec<(f64, u32)> = data
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, &v)| if v.is_nan() { None } else { Some((v, i as u32)) })
+                        .collect();
+                    pairs.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                    Some((name.clone(), pairs))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Self { cols, f64_any_nan, f64_sorted, len }
     }
 
     fn get_bitset(
@@ -610,12 +628,10 @@ enum ResolvedCond<'a> {
         eq: bool,
         target: Option<u16>,
     }, // Eq / Ne: integer compare
-    Str {
+    StrMultiCode {
         codes: &'a [u16],
-        cats: &'a [Option<String>],
-        op: &'a Operator,
-        raw: &'a Value,
-    },
+        matching_cats: Vec<bool>, // matching_cats[code] = true if category passes
+    }, // Contains/StartsWith/EndsWith/In/NotIn: pre-scanned, integer lookup per row
     Missing,
 }
 
@@ -683,6 +699,13 @@ impl<'a> ResolvedCond<'a> {
                     }
                 }
             }
+            ResolvedCond::StrMultiCode { codes, matching_cats } => {
+                for i in start..end {
+                    if matching_cats[codes[i] as usize] {
+                        bs.set(i);
+                    }
+                }
+            }
             _ => {
                 for i in start..end {
                     if eval_one(self, i) {
@@ -728,12 +751,17 @@ fn resolve<'a>(cols: &'a IndexMap<String, Col>, conds: &'a [Condition]) -> Vec<R
                         target,
                     }
                 }
-                _ => ResolvedCond::Str {
-                    codes: &sc.codes,
-                    cats: &sc.categories,
-                    op: &c.operator,
-                    raw: &c.value,
-                },
+                _ => {
+                    let matching_cats: Vec<bool> = sc
+                        .categories
+                        .iter()
+                        .map(|cat| match cat {
+                            None => matches!(c.operator, Operator::IsNull),
+                            Some(s) => eval_str(s.as_str(), &c.operator, &c.value),
+                        })
+                        .collect();
+                    ResolvedCond::StrMultiCode { codes: &sc.codes, matching_cats }
+                }
             },
             None => ResolvedCond::Missing,
         })
@@ -793,15 +821,7 @@ fn eval_one(rc: &ResolvedCond, i: usize) -> bool {
                 None => !*eq,
             }
         }
-        ResolvedCond::Str {
-            codes,
-            cats,
-            op,
-            raw,
-        } => match &cats[codes[i] as usize] {
-            None => matches!(op, Operator::IsNull),
-            Some(s) => eval_str(s.as_str(), op, raw),
-        },
+        ResolvedCond::StrMultiCode { codes, matching_cats } => matching_cats[codes[i] as usize],
         ResolvedCond::Missing => false,
     }
 }
@@ -896,6 +916,25 @@ pub(crate) fn try_columnar(
                 .map(PipelineResult::Number),
         ),
         Some(Find(f)) => {
+            // Fast path: single Eq condition on F64, no prior filter → binary search O(log n)
+            if merged_mask.is_none()
+                && f.conditions.len() == 1
+                && matches!(f.conditions[0].operator, Operator::Eq)
+            {
+                let cond = &f.conditions[0];
+                if let (Some(target), Some(sorted)) =
+                    (cond.value.as_f64(), store.f64_sorted.get(&cond.field))
+                {
+                    let idx = sorted.partition_point(|(v, _)| *v < target);
+                    let found = sorted[idx..]
+                        .iter()
+                        .take_while(|(v, _)| *v == target)
+                        .map(|&(_, row_i)| row_i as usize)
+                        .find(|&i| i >= start && i < end);
+                    return Some(Ok(PipelineResult::Item(found.map(|i| rows[i].clone()))));
+                }
+            }
+
             let combined_mask = if f.conditions.is_empty() {
                 merged_mask
             } else {
@@ -1045,6 +1084,29 @@ impl ColumnStore {
                 Reducer::Avg => slice.iter().copied().sum::<f64>() / cnt as f64,
                 Reducer::Min => slice.iter().copied().fold(f64::INFINITY, f64::min),
                 Reducer::Max => slice.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                Reducer::First | Reducer::Last => unreachable!(),
+            });
+        }
+
+        // Fast path: mask + no NaN → scatter-gather only matched rows, skip O(n) scan
+        if let (Some(m), false) = (mask, any_nan) {
+            let indices = m.indices();
+            let cnt = indices.len();
+            if cnt == 0 {
+                return match op.reducer {
+                    Reducer::Min | Reducer::Max => Err(DataError::Operation {
+                        op: "reduce".into(),
+                        field: op.field.clone(),
+                        reason: "no numeric values found".into(),
+                    }),
+                    _ => Ok(0.0),
+                };
+            }
+            return Ok(match op.reducer {
+                Reducer::Sum => indices.iter().map(|&i| col[i as usize]).sum(),
+                Reducer::Avg => indices.iter().map(|&i| col[i as usize]).sum::<f64>() / cnt as f64,
+                Reducer::Min => indices.iter().map(|&i| col[i as usize]).fold(f64::INFINITY, f64::min),
+                Reducer::Max => indices.iter().map(|&i| col[i as usize]).fold(f64::NEG_INFINITY, f64::max),
                 Reducer::First | Reducer::Last => unreachable!(),
             });
         }
