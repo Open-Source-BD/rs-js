@@ -107,6 +107,8 @@ export interface RsJsOptions {
 export declare class RsJs {
   constructor(data: Record<string, unknown>[], options?: RsJsOptions);
   query(operations: Operation[], options?: PipelineOptions): PipelineResult;
+  /** Async variant — defers to next microtask so callers can use await without blocking the call stack. */
+  queryAsync(operations: Operation[], options?: PipelineOptions): Promise<PipelineResult>;
   /** Returns matching row indices as Uint32Array. */
   filterIndices(
     operations: Operation[],

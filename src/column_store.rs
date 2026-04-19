@@ -33,18 +33,37 @@ impl BitSet {
         (self.bits[i / 64] >> (i % 64)) & 1 != 0
     }
 
+    #[inline]
     pub fn and(&mut self, other: &Self) {
-        for (a, b) in self.bits.iter_mut().zip(other.bits.iter()) {
-            *a &= *b;
+        let n = self.bits.len();
+        let n2 = n & !1;
+        let mut i = 0;
+        while i < n2 {
+            self.bits[i]     &= other.bits[i];
+            self.bits[i + 1] &= other.bits[i + 1];
+            i += 2;
+        }
+        if n & 1 != 0 {
+            self.bits[n - 1] &= other.bits[n - 1];
         }
     }
 
+    #[inline]
     pub fn or(&mut self, other: &Self) {
-        for (a, b) in self.bits.iter_mut().zip(other.bits.iter()) {
-            *a |= *b;
+        let n = self.bits.len();
+        let n2 = n & !1;
+        let mut i = 0;
+        while i < n2 {
+            self.bits[i]     |= other.bits[i];
+            self.bits[i + 1] |= other.bits[i + 1];
+            i += 2;
+        }
+        if n & 1 != 0 {
+            self.bits[n - 1] |= other.bits[n - 1];
         }
     }
 
+    #[inline]
     pub fn count(&self) -> usize {
         self.bits.iter().map(|b| b.count_ones() as usize).sum()
     }
@@ -183,6 +202,8 @@ impl AggBuf {
 
 pub(crate) struct ColumnStore {
     pub(crate) cols: IndexMap<String, Col>,
+    // Pre-computed per-column: true if any NaN/null exists. Used to skip NaN checks in hot loops.
+    pub(crate) f64_any_nan: IndexMap<String, bool>,
     pub len: usize,
 }
 
@@ -192,14 +213,25 @@ impl ColumnStore {
         if len == 0 {
             return Self {
                 cols: IndexMap::new(),
+                f64_any_nan: IndexMap::new(),
                 len: 0,
             };
         }
-        let cols = rows[0]
+        let cols: IndexMap<String, Col> = rows[0]
             .keys()
             .map(|name| (name.clone(), build_col(rows, name)))
             .collect();
-        Self { cols, len }
+        let f64_any_nan: IndexMap<String, bool> = cols
+            .iter()
+            .filter_map(|(name, col)| {
+                if let Col::F64(data) = col {
+                    Some((name.clone(), data.iter().any(|v| v.is_nan())))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Self { cols, f64_any_nan, len }
     }
 
     fn get_bitset(
@@ -417,6 +449,29 @@ impl ColumnStore {
                     .unwrap_or(0.0));
             }
             _ => {}
+        }
+
+        // Fast path: no NaN → branch-free gather the compiler can vectorize
+        let any_nan = self.f64_any_nan.get(&op.field).copied().unwrap_or(true);
+        if !any_nan {
+            let cnt = indices.len();
+            if cnt == 0 {
+                return match op.reducer {
+                    Reducer::Min | Reducer::Max => Err(DataError::Operation {
+                        op: "reduce".into(),
+                        field: op.field.clone(),
+                        reason: "no numeric values in group".into(),
+                    }),
+                    _ => Ok(0.0),
+                };
+            }
+            return Ok(match op.reducer {
+                Reducer::Sum => indices.iter().map(|&i| col[i]).sum(),
+                Reducer::Avg => indices.iter().map(|&i| col[i]).sum::<f64>() / cnt as f64,
+                Reducer::Min => indices.iter().map(|&i| col[i]).fold(f64::INFINITY, f64::min),
+                Reducer::Max => indices.iter().map(|&i| col[i]).fold(f64::NEG_INFINITY, f64::max),
+                Reducer::First | Reducer::Last => unreachable!(),
+            });
         }
 
         let mut sum = 0.0_f64;
@@ -906,6 +961,10 @@ impl ColumnStore {
                     c
                 }
                 Some(Col::F64(v)) => {
+                    // Fast path: no NaN → all values are truthy, count = matched rows
+                    if !self.f64_any_nan.get(f).copied().unwrap_or(true) {
+                        return mask.map_or(end - start, |m| m.count());
+                    }
                     let mut c = 0;
                     for i in start..end {
                         if mask.map_or(true, |m| m.get(i)) && !v[i].is_nan() {
@@ -964,6 +1023,30 @@ impl ColumnStore {
                     .unwrap_or(0.0));
             }
             _ => {}
+        }
+
+        // Fast path: no filter mask + column has no NaN → branch-free loops the compiler vectorizes
+        let any_nan = self.f64_any_nan.get(&op.field).copied().unwrap_or(true);
+        if mask.is_none() && !any_nan {
+            let slice = &col[start..end];
+            let cnt = slice.len();
+            if cnt == 0 {
+                return match op.reducer {
+                    Reducer::Min | Reducer::Max => Err(DataError::Operation {
+                        op: "reduce".into(),
+                        field: op.field.clone(),
+                        reason: "no numeric values found".into(),
+                    }),
+                    _ => Ok(0.0),
+                };
+            }
+            return Ok(match op.reducer {
+                Reducer::Sum => slice.iter().copied().sum(),
+                Reducer::Avg => slice.iter().copied().sum::<f64>() / cnt as f64,
+                Reducer::Min => slice.iter().copied().fold(f64::INFINITY, f64::min),
+                Reducer::Max => slice.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                Reducer::First | Reducer::Last => unreachable!(),
+            });
         }
 
         let mut sum = 0.0_f64;
