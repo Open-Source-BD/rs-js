@@ -183,7 +183,7 @@ export default function App() {
               {[
                 { label: "filterMapRef", value: "5–18×", color: "violet" },
                 { label: "mapRef projection", value: "29×", color: "cyan" },
-                { label: "groupBy + agg", value: "6×", color: "emerald" },
+                { label: "find (binary search)", value: "52×", color: "emerald" },
                 { label: "reduce / count", value: "4–8×", color: "amber" },
               ].map(({ label, value, color }) => (
                 <div

@@ -7,7 +7,7 @@ const BENCH = {
     { id: 'map',           label: 'map',              detail: 'salary × 0.1',         js: 4.14,  eng: 3.75,  cat: 'query'    },
     { id: 'reduce',        label: 'reduce',           detail: 'sum active salaries',  js: 0.23,  eng: 0.06,  cat: 'agg'      },
     { id: 'count',         label: 'count',            detail: 'age ≥ 18',             js: 0.38,  eng: 0.03,  cat: 'agg'      },
-    { id: 'find',          label: 'find',             detail: 'by id',                js: 0.04,  eng: 0.04,  cat: 'query'    },
+    { id: 'find',          label: 'find',             detail: 'by id',                js: 0.05,  eng: 0.01,  cat: 'query'    },
     { id: 'groupBy',       label: 'groupBy',          detail: 'by department',        js: 0.20,  eng: 0.61,  cat: 'agg'      },
     { id: 'groupByAgg',    label: 'groupBy + avg',    detail: 'by country',           js: 0.45,  eng: 0.08,  cat: 'agg'      },
     { id: 'pipeline1',     label: 'pipeline',         detail: 'filter → groupBy+avg', js: 0.45,  eng: 0.10,  cat: 'agg'      },
@@ -23,7 +23,7 @@ const BENCH = {
     { id: 'map',           label: 'map',              detail: 'salary × 0.1',         js: 51.28,  eng: 45.35, cat: 'query'    },
     { id: 'reduce',        label: 'reduce',           detail: 'sum active salaries',  js: 2.30,   eng: 0.30,  cat: 'agg'      },
     { id: 'count',         label: 'count',            detail: 'age ≥ 18',             js: 1.07,   eng: 0.19,  cat: 'agg'      },
-    { id: 'find',          label: 'find',             detail: 'by id',                js: 0.29,   eng: 0.20,  cat: 'query'    },
+    { id: 'find',          label: 'find',             detail: 'by id',                js: 0.29,   eng: 0.01,  cat: 'query'    },
     { id: 'groupBy',       label: 'groupBy',          detail: 'by department',        js: 1.76,   eng: 1.00,  cat: 'agg'      },
     { id: 'groupByAgg',    label: 'groupBy + avg',    detail: 'by country',           js: 0.77,   eng: 0.29,  cat: 'agg'      },
     { id: 'pipeline1',     label: 'pipeline',         detail: 'filter → groupBy+avg', js: 1.68,   eng: 0.65,  cat: 'agg'      },
@@ -39,7 +39,7 @@ const BENCH = {
     { id: 'map',           label: 'map',              detail: 'salary × 0.1',         js: 321.02, eng: 272.51,cat: 'query'    },
     { id: 'reduce',        label: 'reduce',           detail: 'sum active salaries',  js: 9.56,   eng: 1.42,  cat: 'agg'      },
     { id: 'count',         label: 'count',            detail: 'age ≥ 18',             js: 7.01,   eng: 0.95,  cat: 'agg'      },
-    { id: 'find',          label: 'find',             detail: 'by id',                js: 1.47,   eng: 0.95,  cat: 'query'    },
+    { id: 'find',          label: 'find',             detail: 'by id',                js: 1.56,   eng: 0.03,  cat: 'query'    },
     { id: 'groupBy',       label: 'groupBy',          detail: 'by department',        js: 7.66,   eng: 3.98,  cat: 'agg'      },
     { id: 'groupByAgg',    label: 'groupBy + avg',    detail: 'by country',           js: 4.61,   eng: 1.40,  cat: 'agg'      },
     { id: 'pipeline1',     label: 'pipeline',         detail: 'filter → groupBy+avg', js: 8.22,   eng: 3.08,  cat: 'agg'      },
@@ -224,9 +224,9 @@ export default function PerformanceBenchmark() {
       {/* Hero stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         <StatCard
-          value="45.3×"
+          value="52×"
           label="Peak Speedup"
-          sub="mapRef projection at 500k rows"
+          sub="find (binary search) at 500k rows"
           color="emerald"
         />
         <StatCard
